@@ -1,0 +1,8 @@
+config jp_ipoe 'config'
+	option wan_device 'eth0'
+	option wan6_iface 'wan6'
+	option mape_iface 'wan6mape'
+	option br_addr ''
+	option keep_pppoe '1'
+	option enabled '0'
+	option legacymap '1'

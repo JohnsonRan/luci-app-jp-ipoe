@@ -1,0 +1,165 @@
+# LuCI po template for luci-app-jp-ipoe
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-jp-ipoe\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-04-15\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "JP IPoE Configuration"
+msgstr ""
+
+msgid "Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin will automatically set up IPv6 WAN (DHCPv6) and MAP-E tunnel interfaces."
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "Enable at Boot"
+msgstr ""
+
+msgid "Automatically apply configuration on router startup."
+msgstr ""
+
+msgid "WAN Physical Device"
+msgstr ""
+
+msgid "Physical network device used for WAN connection (e.g. eth0)."
+msgstr ""
+
+msgid "IPv6 WAN Interface Name"
+msgstr ""
+
+msgid "Name for the DHCPv6 interface to be created (default: wan6)."
+msgstr ""
+
+msgid "MAP-E Interface Name"
+msgstr ""
+
+msgid "Name for the MAP-E tunnel interface (default: wan6mape)."
+msgstr ""
+
+msgid "Use Legacy MAP"
+msgstr ""
+
+msgid "Enable legacy MAP mode. Required for OCN Virtual Connect."
+msgstr ""
+
+msgid "BR Address (Border Relay)"
+msgstr ""
+
+msgid "OCN's Border Relay IPv6 address. Leave empty to auto-detect via mapcalc after WAN6 is up. Click 'Detect' button on the Status page to populate this field."
+msgstr ""
+
+msgid "Keep PPPoE as Fallback"
+msgstr ""
+
+msgid "Retain existing PPPoE WAN interface for IPv4 fallback connectivity."
+msgstr ""
+
+msgid "Actions"
+msgstr ""
+
+msgid "Apply or remove IPoE configuration immediately."
+msgstr ""
+
+msgid "Apply IPoE Configuration"
+msgstr ""
+
+msgid "Stop IPoE Interfaces"
+msgstr ""
+
+msgid "Applying..."
+msgstr ""
+
+msgid "Stopping..."
+msgstr ""
+
+msgid "Done"
+msgstr ""
+
+msgid "Error: check router logs"
+msgstr ""
+
+msgid "JP IPoE Status"
+msgstr ""
+
+msgid "Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces."
+msgstr ""
+
+msgid "Item"
+msgstr ""
+
+msgid "Value"
+msgstr ""
+
+msgid "WAN6 Interface"
+msgstr ""
+
+msgid "WAN6 Device"
+msgstr ""
+
+msgid "WAN6 IPv6 Address"
+msgstr ""
+
+msgid "MAP-E Interface"
+msgstr ""
+
+msgid "MAP-E Tunnel State"
+msgstr ""
+
+msgid "MAP-E IPv4 Address"
+msgstr ""
+
+msgid "Border Relay (BR)"
+msgstr ""
+
+msgid "Assigned Port Ranges"
+msgstr ""
+
+msgid "Refresh"
+msgstr ""
+
+msgid "Auto-Detect BR Address"
+msgstr ""
+
+msgid "Loading..."
+msgstr ""
+
+msgid "Not connected"
+msgstr ""
+
+msgid "Not assigned"
+msgstr ""
+
+msgid "Not set"
+msgstr ""
+
+msgid "Detecting BR address via mapcalc..."
+msgstr ""
+
+msgid "Detection failed"
+msgstr ""
+
+msgid "BR address detected"
+msgstr ""
+
+msgid "Save detected BR address to configuration?"
+msgstr ""
+
+msgid "BR address saved to config."
+msgstr ""
+
+msgid "Detection error"
+msgstr ""
+
+msgid "Failed to fetch status"
+msgstr ""
+
+msgid "Last Setup Log"
+msgstr ""

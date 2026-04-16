@@ -1,0 +1,29 @@
+{
+  "admin/network/jp_ipoe": {
+    "title": "JP IPoE",
+    "order": 90,
+    "action": {
+      "type": "firstchild"
+    },
+    "depends": {
+      "acl": [ "luci-app-jp-ipoe" ],
+      "uci": { "jp_ipoe": true }
+    }
+  },
+  "admin/network/jp_ipoe/status": {
+    "title": "Status",
+    "order": 1,
+    "action": {
+      "type": "view",
+      "path": "jp_ipoe/status"
+    }
+  },
+  "admin/network/jp_ipoe/config": {
+    "title": "Configuration",
+    "order": 2,
+    "action": {
+      "type": "view",
+      "path": "jp_ipoe/config"
+    }
+  }
+}

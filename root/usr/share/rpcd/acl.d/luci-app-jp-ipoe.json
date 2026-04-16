@@ -1,0 +1,20 @@
+{
+  "luci-app-jp-ipoe": {
+    "description": "Grant access to JP IPoE (OCN MAP-E) configuration",
+    "read": {
+      "file": {
+        "/usr/sbin/jp-ipoe-setup": [ "exec" ],
+        "/etc/init.d/jp_ipoe": [ "exec" ],
+        "/tmp/jp-ipoe.log": [ "read" ]
+      },
+      "uci": [ "jp_ipoe", "network", "firewall" ]
+    },
+    "write": {
+      "file": {
+        "/usr/sbin/jp-ipoe-setup": [ "exec" ],
+        "/etc/init.d/jp_ipoe": [ "exec" ]
+      },
+      "uci": [ "jp_ipoe", "network", "firewall" ]
+    }
+  }
+}

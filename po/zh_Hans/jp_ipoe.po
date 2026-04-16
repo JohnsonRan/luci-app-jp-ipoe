@@ -1,0 +1,165 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-jp-ipoe\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-04-15\n"
+"PO-Revision-Date: 2025-04-15 00:00+0900\n"
+"Last-Translator: \n"
+"Language-Team: Chinese Simplified\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "JP IPoE Configuration"
+msgstr "JP IPoE 配置"
+
+msgid "Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin will automatically set up IPv6 WAN (DHCPv6) and MAP-E tunnel interfaces."
+msgstr "配置 OCN バーチャルコネクト（MAP-E）IPoE 连接。此插件将自动配置 IPv6 WAN（DHCPv6）和 MAP-E 隧道接口。"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Enable at Boot"
+msgstr "开机时自动启用"
+
+msgid "Automatically apply configuration on router startup."
+msgstr "路由器启动时自动应用配置。"
+
+msgid "WAN Physical Device"
+msgstr "WAN 物理设备"
+
+msgid "Physical network device used for WAN connection (e.g. eth0)."
+msgstr "用于 WAN 连接的物理网络设备（例如 eth0）。"
+
+msgid "IPv6 WAN Interface Name"
+msgstr "IPv6 WAN 接口名称"
+
+msgid "Name for the DHCPv6 interface to be created (default: wan6)."
+msgstr "将要创建的 DHCPv6 接口名称（默认：wan6）。"
+
+msgid "MAP-E Interface Name"
+msgstr "MAP-E 接口名称"
+
+msgid "Name for the MAP-E tunnel interface (default: wan6mape)."
+msgstr "MAP-E 隧道接口的名称（默认：wan6mape）。"
+
+msgid "Use Legacy MAP"
+msgstr "使用 Legacy MAP 模式"
+
+msgid "Enable legacy MAP mode. Required for OCN Virtual Connect."
+msgstr "启用 Legacy MAP 模式，OCN バーチャルコネクト 必须开启此项。"
+
+msgid "BR Address (Border Relay)"
+msgstr "BR 地址（边界中继）"
+
+msgid "OCN's Border Relay IPv6 address. Leave empty to auto-detect via mapcalc after WAN6 is up. Click 'Detect' button on the Status page to populate this field."
+msgstr "OCN 的边界中继 IPv6 地址。WAN6 启动后可通过 mapcalc 自动检测，留空即可；也可在状态页点击「自动检测」按钮填充此字段。"
+
+msgid "Keep PPPoE as Fallback"
+msgstr "保留 PPPoE 作为备用"
+
+msgid "Retain existing PPPoE WAN interface for IPv4 fallback connectivity."
+msgstr "保留现有的 PPPoE WAN 接口，用于 IPv4 备用连接。"
+
+msgid "Actions"
+msgstr "操作"
+
+msgid "Apply or remove IPoE configuration immediately."
+msgstr "立即应用或移除 IPoE 配置。"
+
+msgid "Apply IPoE Configuration"
+msgstr "应用 IPoE 配置"
+
+msgid "Stop IPoE Interfaces"
+msgstr "停止 IPoE 接口"
+
+msgid "Applying..."
+msgstr "应用中..."
+
+msgid "Stopping..."
+msgstr "停止中..."
+
+msgid "Done"
+msgstr "完成"
+
+msgid "Error: check router logs"
+msgstr "出错：请检查路由器日志"
+
+msgid "JP IPoE Status"
+msgstr "JP IPoE 状态"
+
+msgid "Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces."
+msgstr "OCN バーチャルコネクト（MAP-E）IPoE 接口的实时状态。"
+
+msgid "Item"
+msgstr "项目"
+
+msgid "Value"
+msgstr "值"
+
+msgid "WAN6 Interface"
+msgstr "WAN6 接口"
+
+msgid "WAN6 Device"
+msgstr "WAN6 设备"
+
+msgid "WAN6 IPv6 Address"
+msgstr "WAN6 IPv6 地址"
+
+msgid "MAP-E Interface"
+msgstr "MAP-E 接口"
+
+msgid "MAP-E Tunnel State"
+msgstr "MAP-E 隧道状态"
+
+msgid "MAP-E IPv4 Address"
+msgstr "MAP-E IPv4 地址"
+
+msgid "Border Relay (BR)"
+msgstr "边界中继（BR）"
+
+msgid "Assigned Port Ranges"
+msgstr "已分配端口范围"
+
+msgid "Refresh"
+msgstr "刷新"
+
+msgid "Auto-Detect BR Address"
+msgstr "自动检测 BR 地址"
+
+msgid "Loading..."
+msgstr "加载中..."
+
+msgid "Not connected"
+msgstr "未连接"
+
+msgid "Not assigned"
+msgstr "未分配"
+
+msgid "Not set"
+msgstr "未设置"
+
+msgid "Detecting BR address via mapcalc..."
+msgstr "正在通过 mapcalc 检测 BR 地址..."
+
+msgid "Detection failed"
+msgstr "检测失败"
+
+msgid "BR address detected"
+msgstr "已检测到 BR 地址"
+
+msgid "Save detected BR address to configuration?"
+msgstr "是否将检测到的 BR 地址保存到配置中？"
+
+msgid "BR address saved to config."
+msgstr "BR 地址已保存到配置。"
+
+msgid "Detection error"
+msgstr "检测出错"
+
+msgid "Failed to fetch status"
+msgstr "获取状态失败"
+
+msgid "Last Setup Log"
+msgstr "最近配置日志"
