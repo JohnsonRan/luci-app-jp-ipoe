@@ -283,6 +283,32 @@ setup_dhcpv6_relay() {
 	log "DHCPv6 Relay configured successfully."
 }
 
+# Disable DHCPv6 / Router Advertisement Relay and restore server mode
+disable_dhcpv6_relay() {
+	local wan6_iface="$1"
+	log "DHCPv6 Relay disabled, restoring standard server mode for lan..."
+
+	# For WAN6, remove relay settings
+	local wan6_dhcp=$(uci -q get dhcp."$wan6_iface" 2>/dev/null)
+	if [ -n "$wan6_dhcp" ]; then
+		uci delete dhcp."$wan6_iface".master 2>/dev/null
+		uci set dhcp."$wan6_iface".ra="disabled"
+		uci set dhcp."$wan6_iface".dhcpv6="disabled"
+		uci set dhcp."$wan6_iface".ndp="disabled"
+	fi
+
+	# Restore server mode on LAN
+	local lan_dhcp=$(uci -q get dhcp.lan 2>/dev/null)
+	if [ -n "$lan_dhcp" ]; then
+		uci set dhcp.lan.ra="server"
+		uci set dhcp.lan.dhcpv6="server"
+		uci delete dhcp.lan.ndp 2>/dev/null
+	fi
+
+	uci commit dhcp
+	/etc/init.d/odhcpd restart 2>/dev/null || true
+}
+
 # Bring up interfaces
 bring_up_interfaces() {
 	local wan6_iface="$1"
@@ -436,7 +462,7 @@ cmd_start() {
 	if [ "$DHCPV6_RELAY" = "1" ]; then
 		setup_dhcpv6_relay "$WAN6_IFACE"
 	else
-		log "DHCPv6 Relay disabled, skipping. (Assuming IPv6-PD environment)"
+		disable_dhcpv6_relay "$WAN6_IFACE"
 	fi
 
 	# Step 7: Reload firewall and bring up MAP-E
