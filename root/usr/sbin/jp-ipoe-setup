@@ -465,12 +465,14 @@ cmd_start() {
 		disable_dhcpv6_relay "$WAN6_IFACE"
 	fi
 
-	# Step 7: Reload firewall and bring up MAP-E
+	# Step 7: Bring up MAP-E interface to apply patched script, then reload firewall
+	log "Bringing up MAP-E interface..."
+	ifdown "$MAPE_IFACE" 2>/dev/null || true
+	sleep 1
+	ifup "$MAPE_IFACE" 2>/dev/null || true
+
 	log "Reloading firewall..."
 	fw4 reload 2>/dev/null || true
-
-	log "Bringing up MAP-E interface..."
-	ifup "$MAPE_IFACE" 2>/dev/null || true
 
 	log "JP IPoE setup complete!"
 	return 0
