@@ -23,6 +23,7 @@ jp_ipoe_info_status() {
 	local wan6_iface="$1"
 	local mape_iface="$2"
 	local br_addr="$3"
+	local runtime_br_addr=""
 	local wan6_dev
 	local ipv6_addr=""
 	local mape_ip4=""
@@ -49,6 +50,9 @@ jp_ipoe_info_status() {
 		mape_state="up"
 		mape_ip4="$(ip -4 addr show dev "$mape_dev" 2>/dev/null | awk '/inet / {print $2; exit}')"
 	fi
+
+	runtime_br_addr="$(uci -q get network."$mape_iface".peeraddr 2>/dev/null)"
+	[ -n "$runtime_br_addr" ] && br_addr="$runtime_br_addr"
 
 	if [ -f "/tmp/map-${mape_iface}.rules" ]; then
 		port_info="$(grep "PORTSETS" /tmp/map-${mape_iface}.rules | head -1 | sed 's/.*PORTSETS=//;s/RULE_.*//')"
@@ -83,6 +87,7 @@ jp_ipoe_info_detect_br() {
 	local wan6_iface="$1"
 	local legacymap="$2"
 	local wan6_dev
+	local wan6_ipv6=""
 	local rule_data
 	local br
 	local ipv4
@@ -96,10 +101,16 @@ jp_ipoe_info_detect_br() {
 		return 1
 	fi
 
+	wan6_ipv6="$(ip -6 addr show dev "$wan6_dev" scope global 2>/dev/null | awk '/inet6/ && !/::1/ {print $2; exit}')"
+
 	rule_data="$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)"
 	if [ $? -ne 0 ] || [ -z "$rule_data" ]; then
 		json_init
-		json_add_string "error" "mapcalc failed - WAN6 may not have an IPv6 address"
+		if [ -n "$wan6_ipv6" ]; then
+			json_add_string "error" "mapcalc failed - WAN6 has IPv6, but MAP-E still has no matching PD/ip6prefix"
+		else
+			json_add_string "error" "mapcalc failed - WAN6 has no global IPv6 address yet"
+		fi
 		json_dump
 		return 1
 	fi

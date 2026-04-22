@@ -239,6 +239,45 @@ get_ipv6_prefix() {
 	return 0
 }
 
+# MAP-E still needs wan6.ip6prefix when relay mode is enabled or when the
+# tunnel is being driven by manual MAP bounds / BR settings.
+wan6_ip6prefix_required() {
+	[ "$DHCPV6_RELAY" = "1" ] && return 0
+	[ -n "$IPADDR" ] && return 0
+	[ -n "$IP6PREFIX" ] && return 0
+	[ -n "$BR_ADDR" ] && return 0
+	return 1
+}
+
+ensure_wan6_ip6prefix() {
+	local wan6_iface="$1"
+	local wan6_dev="$2"
+	local ip6prefix
+	local current_prefix
+
+	if ! wan6_ip6prefix_required; then
+		log "Leaving $wan6_iface ip6prefix unchanged; MAP-E is using automatic PD matching."
+		return 0
+	fi
+
+	ip6prefix=$(get_ipv6_prefix "$wan6_dev") || return 1
+	[ -n "$ip6prefix" ] || return 1
+
+	current_prefix=$(uci -q get network."$wan6_iface".ip6prefix 2>/dev/null)
+	if [ "$current_prefix" = "$ip6prefix" ]; then
+		log "$wan6_iface ip6prefix already set to $ip6prefix"
+		return 0
+	fi
+
+	log "Setting $wan6_iface ip6prefix to $ip6prefix for MAP-E startup"
+	uci set network."$wan6_iface".ip6prefix="$ip6prefix"
+	uci commit network
+	ifdown "$wan6_iface" 2>/dev/null || true
+	sleep 2
+	ifup "$wan6_iface" 2>/dev/null || true
+	wait_for_ipv6 "$wan6_dev" 60 >/dev/null || return 1
+}
+
 # Configure WAN6 interface via UCI
 setup_wan6() {
 	local device="$1"
@@ -624,24 +663,12 @@ cmd_start() {
 		return 1
 	fi
 
-	# Step 4: Extract /64 prefix and set ip6prefix on WAN6
-	# This is needed for ISPs that don't provide PD (OCN /64 without Hikari phone)
-	local ip6prefix
-	ip6prefix=$(get_ipv6_prefix "$wan6_dev")
-	if [ $? -eq 0 ] && [ -n "$ip6prefix" ]; then
-		# Check if already set correctly
-		local current_prefix=$(uci -q get network."$WAN6_IFACE".ip6prefix 2>/dev/null)
-		if [ "$current_prefix" != "$ip6prefix" ]; then
-			log "Setting ip6prefix=$ip6prefix on $WAN6_IFACE"
-			uci set network."$WAN6_IFACE".ip6prefix="$ip6prefix"
-			uci commit network
-			# Restart WAN6 with the correct prefix
-			ifdown "$WAN6_IFACE" 2>/dev/null || true
-			sleep 2
-			ifup "$WAN6_IFACE" 2>/dev/null || true
-			sleep 5
-		fi
-	fi
+	# Step 4: Seed wan6 with a /64 ip6prefix only when MAP-E depends on it.
+	# Pure auto-PD setups keep the delegated prefix untouched.
+	ensure_wan6_ip6prefix "$WAN6_IFACE" "$wan6_dev" || {
+		fail_start "Failed to prepare WAN6 ip6prefix for MAP-E startup."
+		return 1
+	}
 
 	# Step 5: Setup MAP-E interface
 	setup_mape "$MAPE_IFACE" "$WAN6_IFACE" "$BR_ADDR" "$LEGACYMAP"
