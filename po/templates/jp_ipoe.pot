@@ -1,177 +1,318 @@
-# LuCI po template for luci-app-jp-ipoe
 msgid ""
-msgstr ""
-"Project-Id-Version: luci-app-jp-ipoe\n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-04-15\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
-"Language-Team: LANGUAGE <LL@li.org>\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=UTF-8\n"
-"Content-Transfer-Encoding: 8bit\n"
+msgstr "Content-Type: text/plain; charset=UTF-8"
 
-msgid "JP IPoE Configuration"
-msgstr ""
-
-msgid "Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin will automatically set up IPv6 WAN (DHCPv6) and MAP-E tunnel interfaces."
-msgstr ""
-
-msgid "Settings"
-msgstr ""
-
-msgid "Enable at Boot"
-msgstr ""
-
-msgid "Automatically apply configuration on router startup."
-msgstr ""
-
-msgid "WAN Physical Device"
-msgstr ""
-
-msgid "Physical network device used for WAN connection (e.g. eth0)."
-msgstr ""
-
-msgid "IPv6 WAN Interface Name"
-msgstr ""
-
-msgid "Name for the DHCPv6 interface to be created (default: wan6)."
-msgstr ""
-
-msgid "MAP-E Interface Name"
-msgstr ""
-
-msgid "Name for the MAP-E tunnel interface (default: wan6mape)."
-msgstr ""
-
-msgid "Use Legacy MAP"
-msgstr ""
-
-msgid "Enable legacy MAP mode. Required for OCN Virtual Connect."
-msgstr ""
-
-msgid "BR Address (Border Relay)"
-msgstr ""
-
-msgid "OCN's Border Relay IPv6 address. Leave empty to auto-detect via mapcalc after WAN6 is up. Click 'Detect' button on the Status page to populate this field."
-msgstr ""
-
-msgid "Reserved IPv4 Ports"
-msgstr ""
-
-msgid "Space-separated IPv4 ports that should never be selected for MAP-E SNAT. Leave empty unless you intentionally reserve fixed inbound service ports."
-msgstr ""
-
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:82
 msgid "Actions"
 msgstr ""
 
-msgid "Apply or remove IPoE configuration immediately."
-msgstr ""
-
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:104
 msgid "Apply IPoE Configuration"
 msgstr ""
 
-msgid "Stop IPoE Interfaces"
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:82
+msgid "Apply or remove IPoE configuration immediately."
 msgstr ""
 
-msgid "Applying..."
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:92
+msgid ""
+"Applying IPoE configuration. Please wait ~30 seconds for IPv6 prefix "
+"detection."
 msgstr ""
 
-msgid "Stopping..."
-msgstr ""
-
-msgid "Done"
-msgstr ""
-
-msgid "Error: check router logs"
-msgstr ""
-
-msgid "JP IPoE Status"
-msgstr ""
-
-msgid "Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces."
-msgstr ""
-
-msgid "Item"
-msgstr ""
-
-msgid "Value"
-msgstr ""
-
-msgid "WAN6 Interface"
-msgstr ""
-
-msgid "WAN6 Device"
-msgstr ""
-
-msgid "WAN6 IPv6 Address"
-msgstr ""
-
-msgid "MAP-E Interface"
-msgstr ""
-
-msgid "MAP-E Tunnel State"
-msgstr ""
-
-msgid "MAP-E IPv4 Address"
-msgstr ""
-
-msgid "Border Relay (BR)"
-msgstr ""
-
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:55
 msgid "Assigned Port Ranges"
 msgstr ""
 
-msgid "Recoverable State"
-msgstr ""
-
-msgid "PPPoE Fallback Metric"
-msgstr ""
-
-msgid "Refresh"
-msgstr ""
-
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:81
 msgid "Auto-Detect BR Address"
 msgstr ""
 
-msgid "Loading..."
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:16
+msgid "Automatically apply configuration on router startup."
 msgstr ""
 
-msgid "Not connected"
-msgstr ""
-
-msgid "Not assigned"
-msgstr ""
-
-msgid "Not set"
-msgstr ""
-
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:124
 msgid "Available"
 msgstr ""
 
-msgid "None"
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:35
+msgid "BR Address (Border Relay)"
 msgstr ""
 
-msgid "Detecting BR address via mapcalc..."
-msgstr ""
-
-msgid "Detection failed"
-msgstr ""
-
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:147
 msgid "BR address detected"
 msgstr ""
 
-msgid "Save detected BR address to configuration?"
-msgstr ""
-
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:160
 msgid "BR address saved to config."
 msgstr ""
 
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:51
+msgid "Border Relay (BR)"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/root/usr/share/luci/menu.d/luci-app-jp-ipoe.json:22
+msgid "Configuration"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:11
+msgid ""
+"Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin will "
+"automatically set up IPv6 WAN (DHCPv6) and MAP-E tunnel interfaces."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:136
+msgid "Detecting BR address via mapcalc..."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:170
 msgid "Detection error"
 msgstr ""
 
-msgid "Failed to fetch status"
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:143
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:167
+msgid "Detection failed"
 msgstr ""
 
-msgid "Last Setup Log"
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:58
+msgid "EA bits length"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:78
+msgid "Enable DHCPv6/NDP Relay"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:16
+msgid "Enable at Boot"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:31
+msgid "Enable legacy MAP mode. Required for OCN Virtual Connect."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:78
+msgid ""
+"Enable this if your ISP provides only an RA /64 prefix without Prefix "
+"Delegation (PD). If you have IPv6-PD, uncheck this to use standard Server "
+"mode."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:101
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:112
+msgid "Error executing setup script:"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:164
+msgid "Failed to parse detection result"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:128
+msgid "Failed to parse status"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/root/usr/share/rpcd/acl.d/luci-app-jp-ipoe.json:3
+msgid "Grant access to JP IPoE (OCN MAP-E) configuration"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:97
+msgid "IPoE configuration applied."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:110
+msgid "IPoE interfaces stopped."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:40
+msgid "IPv4 Prefix (ipaddr)"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:44
+msgid "IPv4 Prefix Length"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:49
+msgid "IPv6 Prefix"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:53
+msgid "IPv6 Prefix Length"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:23
+msgid "IPv6 WAN Interface Name"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:23
+msgid "Item"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/root/usr/share/luci/menu.d/luci-app-jp-ipoe.json:3
+msgid "JP IPoE"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:11
+msgid "JP IPoE Configuration"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:17
+msgid "JP IPoE Status"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:47
+msgid "MAP-E IPv4 Address"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:39
+msgid "MAP-E Interface"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:27
+msgid "MAP-E Interface Name"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:43
+msgid "MAP-E Tunnel State"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:40
+msgid ""
+"Mapped IPv4 prefix calculated from the MAP-E calculator (e.g. "
+"153.153.153.153)."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:49
+msgid "Mapped IPv6 prefix (e.g. 2400:4050::)."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:23
+msgid "Name for the DHCPv6 interface to be created (default: wan6)."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:27
+msgid "Name for the MAP-E tunnel interface (default: wan6mape)."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:124
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:125
+msgid "None"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:44
+msgid "Normally 20 for OCN."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:53
+msgid "Normally 38 for OCN."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:68
+msgid "Normally 4 for OCN."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:58
+msgid "Normally 42 for OCN."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:63
+msgid "Normally 6 for OCN."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:121
+msgid "Not assigned"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:111
+msgid "Not connected"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:122
+msgid "Not set"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:35
+msgid ""
+"OCN's Border Relay IPv6 address (e.g. 2001:f88:...). Use the MAP-E "
+"calculator (http://ipv4.web.fc2.com/map-e.html) to obtain this value."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:63
+msgid "PPPoE Fallback Metric"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:63
+msgid "PSID bits length"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:68
+msgid "PSID offset"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:19
+msgid "Physical network device used for WAN connection (e.g. eth0)."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:18
+msgid "Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:59
+msgid "Recoverable State"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:75
+msgid "Refresh"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:73
+msgid "Reserved IPv4 Ports"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:155
+msgid "Save detected BR address to configuration?"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:13
+msgid "Settings"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:99
+msgid "Setup script exited with code:"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:73
+msgid ""
+"Space-separated IPv4 ports that should never be selected for MAP-E SNAT. "
+"Leave empty unless you intentionally reserve fixed inbound service ports."
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/root/usr/share/luci/menu.d/luci-app-jp-ipoe.json:14
+msgid "Status"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:115
+msgid "Stop IPoE Interfaces"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:31
+msgid "Use Legacy MAP"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:24
+msgid "Value"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:19
+msgid "WAN Physical Device"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:31
+msgid "WAN6 Device"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:35
+msgid "WAN6 IPv6 Address"
+msgstr ""
+
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:27
+msgid "WAN6 Interface"
 msgstr ""
