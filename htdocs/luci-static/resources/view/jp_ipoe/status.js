@@ -3,7 +3,6 @@
 'require fs';
 'require ui';
 'require poll';
-'require rpc';
 'require uci';
 
 return view.extend({
@@ -55,6 +54,14 @@ return view.extend({
 					E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
 						E('td', { 'class': 'td left' }, _('Assigned Port Ranges')),
 						E('td', { 'class': 'td left', 'id': 's-port-info' }, '-')
+					]),
+					E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
+						E('td', { 'class': 'td left' }, _('Recoverable State')),
+						E('td', { 'class': 'td left', 'id': 's-restore-state' }, '-')
+					]),
+					E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
+						E('td', { 'class': 'td left' }, _('PPPoE Fallback Metric')),
+						E('td', { 'class': 'td left', 'id': 's-pppoe-metric' }, '-')
 					])
 				])
 			]),
@@ -114,6 +121,8 @@ return view.extend({
 					setField('s-mape-ipv4', data.mape_ipv4 || _('Not assigned'), !!data.mape_ipv4);
 					setField('s-br-addr', data.br_addr || _('Not set'), !!data.br_addr);
 					setField('s-port-info', data.port_info || '-');
+					setField('s-restore-state', data.has_restore_state ? _('Available') : _('None'), !!data.has_restore_state);
+					setField('s-pppoe-metric', data.pppoe_fallback_metrics || _('None'));
 				} catch(e) {
 					var msg = document.getElementById('action-msg');
 					if(msg) msg.textContent = _('Failed to parse status');

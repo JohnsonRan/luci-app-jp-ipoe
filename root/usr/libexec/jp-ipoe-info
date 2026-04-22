@@ -1,0 +1,150 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /usr/share/libubox/jshn.sh
+. /usr/libexec/jp-ipoe-state
+
+jp_ipoe_info_mapcalc_lookup() {
+	local rule_data="$1"
+	local suffix="$2"
+	local rule_index
+	local value
+
+	eval "$rule_data"
+	rule_index="${RULE_BMR:-1}"
+	eval "value=\${RULE_${rule_index}_${suffix}}"
+	if [ -z "$value" ] && [ "$rule_index" != "1" ]; then
+		eval "value=\${RULE_1_${suffix}}"
+	fi
+	printf '%s' "$value"
+}
+
+jp_ipoe_info_status() {
+	local wan6_iface="$1"
+	local mape_iface="$2"
+	local br_addr="$3"
+	local wan6_dev
+	local ipv6_addr=""
+	local mape_ip4=""
+	local mape_state="down"
+	local mape_dev
+	local port_info=""
+	local pppoe_fallback_metrics=""
+	local pppoe_sections=""
+	local pppoe_section
+	local pppoe_metric
+
+	if jp_ipoe_state_load_session_metadata; then
+		[ -n "$JP_IPOE_SESSION_WAN6_IFACE" ] && wan6_iface="$JP_IPOE_SESSION_WAN6_IFACE"
+		[ -n "$JP_IPOE_SESSION_MAPE_IFACE" ] && mape_iface="$JP_IPOE_SESSION_MAPE_IFACE"
+	fi
+
+	wan6_dev="$(uci -q get network."$wan6_iface".device 2>/dev/null)"
+	if [ -n "$wan6_dev" ]; then
+		ipv6_addr="$(ip -6 addr show dev "$wan6_dev" scope global 2>/dev/null | awk '/inet6/ && !/::1/ {print $2; exit}')"
+	fi
+
+	mape_dev="map-$mape_iface"
+	if ip link show "$mape_dev" >/dev/null 2>&1; then
+		mape_state="up"
+		mape_ip4="$(ip -4 addr show dev "$mape_dev" 2>/dev/null | awk '/inet / {print $2; exit}')"
+	fi
+
+	if [ -f "/tmp/map-${mape_iface}.rules" ]; then
+		port_info="$(grep "PORTSETS" /tmp/map-${mape_iface}.rules | head -1 | sed 's/.*PORTSETS=//;s/RULE_.*//')"
+	fi
+
+	pppoe_sections="$(jp_ipoe_state_load_pppoe_sections 2>/dev/null || true)"
+	for pppoe_section in $pppoe_sections; do
+		pppoe_metric="$(uci -q get network."$pppoe_section".metric 2>/dev/null)"
+		[ -n "$pppoe_metric" ] || pppoe_metric="-"
+		pppoe_fallback_metrics="${pppoe_fallback_metrics}${pppoe_fallback_metrics:+, }${pppoe_section}=${pppoe_metric}"
+	done
+
+	json_init
+	json_add_string "wan6_iface" "$wan6_iface"
+	json_add_string "wan6_device" "${wan6_dev:-unknown}"
+	json_add_string "wan6_ipv6" "${ipv6_addr:-}"
+	json_add_string "mape_iface" "$mape_iface"
+	json_add_string "mape_state" "$mape_state"
+	json_add_string "mape_ipv4" "${mape_ip4:-}"
+	json_add_string "br_addr" "${br_addr:-}"
+	json_add_string "port_info" "${port_info:-}"
+	if [ -f "$(jp_ipoe_state_file session)" ]; then
+		json_add_boolean "has_restore_state" 1
+	else
+		json_add_boolean "has_restore_state" 0
+	fi
+	json_add_string "pppoe_fallback_metrics" "${pppoe_fallback_metrics:-}"
+	json_dump
+}
+
+jp_ipoe_info_detect_br() {
+	local wan6_iface="$1"
+	local legacymap="$2"
+	local wan6_dev
+	local rule_data
+	local br
+	local ipv4
+	local portsets
+
+	wan6_dev="$(uci -q get network."$wan6_iface".device 2>/dev/null)"
+	if [ -z "$wan6_dev" ]; then
+		json_init
+		json_add_string "error" "WAN6 interface not configured yet"
+		json_dump
+		return 1
+	fi
+
+	rule_data="$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)"
+	if [ $? -ne 0 ] || [ -z "$rule_data" ]; then
+		json_init
+		json_add_string "error" "mapcalc failed - WAN6 may not have an IPv6 address"
+		json_dump
+		return 1
+	fi
+
+	br="$(jp_ipoe_info_mapcalc_lookup "$rule_data" BR)"
+	ipv4="$(jp_ipoe_info_mapcalc_lookup "$rule_data" IPV4ADDR)"
+	portsets="$(jp_ipoe_info_mapcalc_lookup "$rule_data" PORTSETS)"
+
+	if [ -z "$br" ]; then
+		json_init
+		json_add_string "error" "Could not extract BR address from mapcalc output"
+		json_dump
+		return 1
+	fi
+
+	json_init
+	json_add_string "br_addr" "$br"
+	json_add_string "ipv4" "${ipv4:-}"
+	json_add_string "portsets" "${portsets:-}"
+	json_dump
+}
+
+jp_ipoe_info_lookup_br() {
+	local wan6_iface="$1"
+	local legacymap="$2"
+	local rule_data
+
+	rule_data="$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)"
+	[ $? -eq 0 ] || return 1
+	[ -n "$rule_data" ] || return 1
+
+	jp_ipoe_info_mapcalc_lookup "$rule_data" BR
+}
+
+case "$1" in
+	status)
+		jp_ipoe_info_status "$2" "$3" "$4"
+		;;
+	detect_br)
+		jp_ipoe_info_detect_br "$2" "$3"
+		;;
+	lookup_br)
+		jp_ipoe_info_lookup_br "$2" "$3"
+		;;
+	*)
+		exit 1
+		;;
+esac

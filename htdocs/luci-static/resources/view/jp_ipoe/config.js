@@ -70,8 +70,10 @@ return view.extend({
 		o.default = '4';
 		o.optional = true;
 
-		o = s.option(form.Flag, 'keep_pppoe', _('Keep PPPoE as Fallback'), _('Retain existing PPPoE WAN interface for IPv4 fallback connectivity.'));
-		o.default = o.enabled;
+		o = s.option(form.Value, 'dont_snat_to', _('Reserved IPv4 Ports'), _('Space-separated IPv4 ports that should never be selected for MAP-E SNAT. Leave empty unless you intentionally reserve fixed inbound service ports.'));
+		o.datatype = 'string';
+		o.optional = true;
+		o.placeholder = '2938 7088 10233';
 
 		o = s.option(form.Flag, 'dhcpv6_relay', _('Enable DHCPv6/NDP Relay'), _('Enable this if your ISP provides only an RA /64 prefix without Prefix Delegation (PD). If you have IPv6-PD, uncheck this to use standard Server mode.'));
 		o.default = o.enabled;
@@ -84,25 +86,31 @@ return view.extend({
 		o.render = function(section_id) {
 			return E('div', { class: 'cbi-value' }, [
 				E('div', { class: 'cbi-value-field' }, [
-					E('button', {
-						class: 'btn cbi-button cbi-button-action',
-						click: ui.createHandlerFn(this, function() {
-							return fs.exec('/etc/init.d/jp_ipoe', ['restart']).then(function(res) {
-								ui.addNotification(null, E('p', _('Setup started in background. Please wait ~30 seconds for IPv6 prefix detection.')), 'info');
-							}).catch(function(e) {
-								ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
-							});
-						})
-					}, _('Apply IPoE Configuration')),
+						E('button', {
+							class: 'btn cbi-button cbi-button-action',
+							click: ui.createHandlerFn(this, function() {
+								ui.addNotification(null, E('p', _('Applying IPoE configuration. Please wait ~30 seconds for IPv6 prefix detection.')), 'info');
+								return m.save(null, true).then(function() {
+									return fs.exec('/usr/sbin/jp-ipoe-setup', ['start']);
+								}).then(function(res) {
+									if (res.code === 0)
+										ui.addNotification(null, E('p', _('IPoE configuration applied.')), 'info');
+									else
+										ui.addNotification(null, E('p', _('Setup script exited with code: ') + res.code), 'error');
+								}).catch(function(e) {
+									ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
+								});
+							})
+						}, _('Apply IPoE Configuration')),
 					'\u00a0\u00a0',
-					E('button', {
-						class: 'btn cbi-button cbi-button-negative',
-						click: ui.createHandlerFn(this, function() {
-							return fs.exec('/etc/init.d/jp_ipoe', ['stop']).then(function(res) {
-								ui.addNotification(null, E('p', _('IPoE interfaces stopped.')), 'info');
-							}).catch(function(e) {
-								ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
-							});
+						E('button', {
+							class: 'btn cbi-button cbi-button-negative',
+							click: ui.createHandlerFn(this, function() {
+								return fs.exec('/usr/sbin/jp-ipoe-setup', ['stop']).then(function(res) {
+									ui.addNotification(null, E('p', _('IPoE interfaces stopped.')), 'info');
+								}).catch(function(e) {
+									ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
+								});
 						})
 					}, _('Stop IPoE Interfaces'))
 				])

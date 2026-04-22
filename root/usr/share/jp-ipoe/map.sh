@@ -32,7 +32,8 @@
 #
 #DONT_SNAT_TO="2938 7088 10233"
 
-DONT_SNAT_TO="0"
+JP_IPOE_PATCH_VERSION="2026.04.22"
+JP_IPOE_MAP_HELPER="/usr/libexec/jp-ipoe-map-nft"
 
 
 [ -n "$INCLUDE_ONLY" ] || {
@@ -42,10 +43,16 @@ DONT_SNAT_TO="0"
 	init_proto "$@"
 }
 
+jp_ipoe_run_helper() {
+	[ -f "$JP_IPOE_MAP_HELPER" ] || return 1
+	sh "$JP_IPOE_MAP_HELPER" "$@"
+}
+
 proto_map_setup() {
 	local cfg="$1"
 	local iface="$2"
 	local link="map-$cfg"
+	local portsets snat_ip
 
 	local maptype type legacymap mtu ttl tunlink zone encaplimit
 	local rule ipaddr ip4prefixlen ip6prefix ip6prefixlen peeraddr ealen psidlen psid offset
@@ -154,91 +161,21 @@ proto_map_setup() {
 	[ -n "$zone" ] && json_add_string zone "$zone"
 
 	json_add_array firewall
-	  if [ -z "$(eval "echo \$RULE_${k}_PORTSETS")" ]; then
+	  portsets="$(eval "echo \$RULE_${k}_PORTSETS")"
+	  snat_ip="$(eval "echo \$RULE_${k}_IPV4ADDR")"
+	  if [ -z "$portsets" ]; then
 	    json_add_object ""
 	      json_add_string type nat
 	      json_add_string target SNAT
 	      json_add_string family inet
-	      json_add_string snat_ip $(eval "echo \$RULE_${k}_IPV4ADDR")
+	      json_add_string snat_ip "$snat_ip"
 	    json_close_object
 	  else
-
-#------------------------------------
-	    #MODIFICATION 1: Get all ports, and full port count.
-	    #		     Don't include ports in DONT_SNAT_TO
-#------------------------------------
-	    local portcount=0
-	    local allports=""
-	    for portset in $(eval "echo \$RULE_${k}_PORTSETS"); do
-		local startport=$(echo $portset | cut -d'-' -f1)
-		local endport=$(echo $portset | cut -d'-' -f2)
-		for x in $(seq $startport $endport); do
-			local skip=0
-			for d in $DONT_SNAT_TO; do
-				[ "$d" = "$x" ] && skip=1 && break
-			done
-			if [ "$skip" = "0" ]; then
-				allports="${allports}${portcount} : ${x} , "
-				portcount=$((portcount + 1))
-			fi
-		done
-	    done
-	    allports=${allports%??}
-#------------------------------------
-	    #END MODIFICATION 1
-#------------------------------------
-	    
-#------------------------------------
-            #MODIFICATION 2: Create mape table
-#------------------------------------
-            if nft list tables | grep -q "table inet mape"; then                                               
-                nft delete table inet mape                                                                             
-            fi                                                                                                         
-            nft add table inet mape
-            nft add chain inet mape srcnat {type nat hook postrouting priority 0\; policy accept\; }
-#------------------------------------
-	    #END MODIFICATION 2
-#------------------------------------
-
-
-#------------------------------------
-	    #MODIFICATION 3: Create the rules to snat to all the ports
-#------------------------------------
-	    local counter=0
-	    
-            for proto in icmp tcp udp; do
-                if [ "$proto" = "icmp" ]; then
-                    nft add rule inet mape srcnat ip protocol icmp oifname "map-$cfg" snat ip to $(eval "echo \$RULE_${k}_IPV4ADDR")
-                else
-                    nft add rule inet mape srcnat ip protocol $proto oifname "map-$cfg" snat ip to $(eval "echo \$RULE_${k}_IPV4ADDR") : jhash ip saddr . meta l4proto . th sport mod $portcount map { $allports }
-                fi
-            done
-	    #END MODIFICATION 3
-	    
-#------------------------------------
-	    #MODIFICATION 4: Comment out original SNAT implementation.
-#------------------------------------
-#            for portset in $(eval "echo \$RULE_${k}_PORTSETS"); do
-#              for proto in icmp tcp udp; do
-#                json_add_object ""
-#                  json_add_string type nat
-#                  json_add_string target SNAT
-#                  json_add_string family inet
-#                  json_add_string proto "$proto"
-#                  json_add_boolean connlimit_ports 1
-#                  json_add_string snat_ip $(eval "echo \$RULE_${k}_IPV4ADDR")
-#                  json_add_string snat_port "$portset"
-#                json_close_object
-#              done
-#            done
-#------------------------------------
-	    #END MODIFICATION 4
-#-------------------------------------
-#------------------------------------
-	    #ALL MODIFICATIONS FINISHED
-#------------------------------------
-
-
+	    jp_ipoe_run_helper setup "$cfg" "$link" "$snat_ip" "$portsets" || {
+		proto_notify_error "$cfg" "INVALID_PORTSETS"
+		proto_block_restart "$cfg"
+		return
+	    }
 	  fi
 	  if [ "$maptype" = "map-t" ]; then
 		[ -z "$zone" ] && zone=$(fw3 -q network $iface 2>/dev/null)
@@ -299,6 +236,7 @@ proto_map_teardown() {
 		"map-t") [ -f "/proc/net/nat46/control" ] && echo del $link > /proc/net/nat46/control ;;
 	esac
 
+	jp_ipoe_run_helper teardown "$cfg" >/dev/null 2>&1
 	rm -f /tmp/map-$cfg.rules
 }
 

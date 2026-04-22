@@ -56,11 +56,11 @@ msgstr "BR 地址（边界中继）"
 msgid "OCN's Border Relay IPv6 address. Leave empty to auto-detect via mapcalc after WAN6 is up. Click 'Detect' button on the Status page to populate this field."
 msgstr "OCN 的边界中继 IPv6 地址。WAN6 启动后可通过 mapcalc 自动检测，留空即可；也可在状态页点击「自动检测」按钮填充此字段。"
 
-msgid "Keep PPPoE as Fallback"
-msgstr "保留 PPPoE 作为备用"
+msgid "Reserved IPv4 Ports"
+msgstr "保留的 IPv4 端口"
 
-msgid "Retain existing PPPoE WAN interface for IPv4 fallback connectivity."
-msgstr "保留现有的 PPPoE WAN 接口，用于 IPv4 备用连接。"
+msgid "Space-separated IPv4 ports that should never be selected for MAP-E SNAT. Leave empty unless you intentionally reserve fixed inbound service ports."
+msgstr "以空格分隔的 IPv4 端口列表，这些端口不会被用于 MAP-E SNAT。除非你明确要为入站服务保留固定端口，否则保持为空即可。"
 
 msgid "Actions"
 msgstr "操作"
@@ -122,6 +122,12 @@ msgstr "边界中继（BR）"
 msgid "Assigned Port Ranges"
 msgstr "已分配端口范围"
 
+msgid "Recoverable State"
+msgstr "可恢复状态"
+
+msgid "PPPoE Fallback Metric"
+msgstr "PPPoE 回退跃点"
+
 msgid "Refresh"
 msgstr "刷新"
 
@@ -139,6 +145,12 @@ msgstr "未分配"
 
 msgid "Not set"
 msgstr "未设置"
+
+msgid "Available"
+msgstr "可用"
+
+msgid "None"
+msgstr "无"
 
 msgid "Detecting BR address via mapcalc..."
 msgstr "正在通过 mapcalc 检测 BR 地址..."

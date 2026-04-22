@@ -1,0 +1,7 @@
+*.sh text eol=lf
+*.js text eol=lf
+*.po text eol=lf
+*.pot text eol=lf
+root/usr/sbin/* text eol=lf
+root/usr/libexec/* text eol=lf
+root/etc/config/* text eol=lf

@@ -1,0 +1,92 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+table_name() {
+	local cfg="$1"
+	local safe_cfg
+
+	safe_cfg="$(printf '%s' "$cfg" | tr -c 'A-Za-z0-9_' '_')"
+	printf 'jpipoe_%s' "$safe_cfg"
+}
+
+load_reserved_ports() {
+	config_load jp_ipoe 2>/dev/null || return 0
+	config_get DONT_SNAT_TO config dont_snat_to ""
+}
+
+build_portmap() {
+	local portsets="$1"
+	local portset startport endport x skip reserved
+
+	PORTCOUNT=0
+	PORTMAP=""
+	PORTLIST=""
+
+	for portset in $portsets; do
+		startport="${portset%-*}"
+		endport="${portset#*-}"
+
+		[ -n "$startport" ] || continue
+		[ -n "$endport" ] || endport="$startport"
+
+		for x in $(seq "$startport" "$endport"); do
+			skip=0
+			for reserved in $DONT_SNAT_TO; do
+				[ "$reserved" = "$x" ] && skip=1 && break
+			done
+			[ "$skip" = "1" ] && continue
+
+			PORTLIST="${PORTLIST}${PORTLIST:+, }${x}"
+			PORTMAP="${PORTMAP}${PORTCOUNT} : ${x}, "
+			PORTCOUNT=$((PORTCOUNT + 1))
+		done
+	done
+
+	PORTMAP="${PORTMAP%, }"
+	[ "$PORTCOUNT" -gt 0 ]
+}
+
+apply_rules() {
+	local cfg="$1"
+	local link="$2"
+	local snat_ip="$3"
+	local portsets="$4"
+	local nft_table
+
+	load_reserved_ports
+	build_portmap "$portsets" || return 1
+
+	nft_table="$(table_name "$cfg")"
+	nft delete table inet "$nft_table" 2>/dev/null
+
+	{
+		printf 'add table inet %s\n' "$nft_table"
+		printf 'add chain inet %s srcnat { type nat hook postrouting priority 0; policy accept; }\n' "$nft_table"
+		printf 'add rule inet %s srcnat ip protocol icmp oifname "%s" snat ip to %s\n' "$nft_table" "$link" "$snat_ip"
+		printf 'add rule inet %s srcnat ip protocol tcp oifname "%s" tcp sport { %s } snat ip to %s : tcp sport\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
+		printf 'add rule inet %s srcnat ip protocol udp oifname "%s" udp sport { %s } snat ip to %s : udp sport\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
+		printf 'add rule inet %s srcnat ip protocol tcp oifname "%s" snat ip to %s : jhash ip saddr . meta l4proto . th sport mod %s map { %s }\n' "$nft_table" "$link" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
+		printf 'add rule inet %s srcnat ip protocol udp oifname "%s" snat ip to %s : jhash ip saddr . meta l4proto . th sport mod %s map { %s }\n' "$nft_table" "$link" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
+	} | nft -f -
+}
+
+teardown_rules() {
+	local cfg="$1"
+	local nft_table
+
+	nft_table="$(table_name "$cfg")"
+	nft delete table inet "$nft_table" 2>/dev/null
+}
+
+case "$1" in
+	setup)
+		apply_rules "$2" "$3" "$4" "$5"
+		;;
+	teardown)
+		teardown_rules "$2"
+		;;
+	*)
+		exit 1
+		;;
+esac

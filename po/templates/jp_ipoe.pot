@@ -56,10 +56,10 @@ msgstr ""
 msgid "OCN's Border Relay IPv6 address. Leave empty to auto-detect via mapcalc after WAN6 is up. Click 'Detect' button on the Status page to populate this field."
 msgstr ""
 
-msgid "Keep PPPoE as Fallback"
+msgid "Reserved IPv4 Ports"
 msgstr ""
 
-msgid "Retain existing PPPoE WAN interface for IPv4 fallback connectivity."
+msgid "Space-separated IPv4 ports that should never be selected for MAP-E SNAT. Leave empty unless you intentionally reserve fixed inbound service ports."
 msgstr ""
 
 msgid "Actions"
@@ -122,6 +122,12 @@ msgstr ""
 msgid "Assigned Port Ranges"
 msgstr ""
 
+msgid "Recoverable State"
+msgstr ""
+
+msgid "PPPoE Fallback Metric"
+msgstr ""
+
 msgid "Refresh"
 msgstr ""
 
@@ -138,6 +144,12 @@ msgid "Not assigned"
 msgstr ""
 
 msgid "Not set"
+msgstr ""
+
+msgid "Available"
+msgstr ""
+
+msgid "None"
 msgstr ""
 
 msgid "Detecting BR address via mapcalc..."

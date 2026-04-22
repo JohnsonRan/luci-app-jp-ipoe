@@ -23,6 +23,15 @@ stop_service() {
 	/usr/sbin/jp-ipoe-setup stop
 }
 
+restart() {
+	stop_service
+	/usr/sbin/jp-ipoe-setup start
+}
+
+reload_service() {
+	restart
+}
+
 service_triggers() {
 	procd_add_reload_trigger "jp_ipoe"
 }
