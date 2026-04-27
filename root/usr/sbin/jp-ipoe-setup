@@ -497,9 +497,16 @@ restore_map_sh() {
 }
 
 # Configure DHCPv6 / Router Advertisement Relay
-setup_dhcpv6_relay() {
+configure_dhcpv6_relay() {
 	local wan6_iface="$1"
-	log "Configuring DHCPv6 / RA Relay for $wan6_iface and lan..."
+	local enabled="$2"
+
+	if [ "$enabled" = "1" ]; then
+		log "Configuring DHCPv6 / RA Relay for $wan6_iface and lan..."
+	else
+		log "DHCPv6 Relay disabled, restoring standard server mode for lan..."
+	fi
+
 	jp_ipoe_state_snapshot_uci_section dhcp "$wan6_iface" "dhcp_${wan6_iface}" interface master ra dhcpv6 ndp
 	jp_ipoe_state_snapshot_uci_section dhcp "lan" "dhcp_lan" ra dhcpv6 ndp
 
@@ -510,52 +517,34 @@ setup_dhcpv6_relay() {
 		uci set dhcp."$wan6_iface".interface="$wan6_iface"
 	fi
 
-	# Set WAN6 as designated master and enable relay
-	uci set dhcp."$wan6_iface".master="1"
-	uci set dhcp."$wan6_iface".ra="relay"
-	uci set dhcp."$wan6_iface".dhcpv6="relay"
-	uci set dhcp."$wan6_iface".ndp="relay"
-
-	# Enable relay on LAN
-	# Assuming 'lan' is the standard internal interface
-	local lan_dhcp=$(uci -q get dhcp.lan 2>/dev/null)
-	if [ -n "$lan_dhcp" ]; then
-		uci set dhcp.lan.ra="relay"
-		uci set dhcp.lan.dhcpv6="relay"
-		uci set dhcp.lan.ndp="relay"
-	fi
-
-	uci commit dhcp
-	/etc/init.d/odhcpd restart 2>/dev/null || true
-	log "DHCPv6 Relay configured successfully."
-}
-
-# Disable DHCPv6 / Router Advertisement Relay and restore server mode
-disable_dhcpv6_relay() {
-	local wan6_iface="$1"
-	log "DHCPv6 Relay disabled, restoring standard server mode for lan..."
-	jp_ipoe_state_snapshot_uci_section dhcp "$wan6_iface" "dhcp_${wan6_iface}" interface master ra dhcpv6 ndp
-	jp_ipoe_state_snapshot_uci_section dhcp "lan" "dhcp_lan" ra dhcpv6 ndp
-
-	# For WAN6, remove relay settings
-	local wan6_dhcp=$(uci -q get dhcp."$wan6_iface" 2>/dev/null)
-	if [ -n "$wan6_dhcp" ]; then
+	if [ "$enabled" = "1" ]; then
+		uci set dhcp."$wan6_iface".master="1"
+		uci set dhcp."$wan6_iface".ra="relay"
+		uci set dhcp."$wan6_iface".dhcpv6="relay"
+		uci set dhcp."$wan6_iface".ndp="relay"
+	else
 		uci delete dhcp."$wan6_iface".master 2>/dev/null
 		uci set dhcp."$wan6_iface".ra="disabled"
 		uci set dhcp."$wan6_iface".dhcpv6="disabled"
 		uci set dhcp."$wan6_iface".ndp="disabled"
 	fi
 
-	# Restore server mode on LAN
 	local lan_dhcp=$(uci -q get dhcp.lan 2>/dev/null)
 	if [ -n "$lan_dhcp" ]; then
-		uci set dhcp.lan.ra="server"
-		uci set dhcp.lan.dhcpv6="server"
-		uci delete dhcp.lan.ndp 2>/dev/null
+		if [ "$enabled" = "1" ]; then
+			uci set dhcp.lan.ra="relay"
+			uci set dhcp.lan.dhcpv6="relay"
+			uci set dhcp.lan.ndp="relay"
+		else
+			uci set dhcp.lan.ra="server"
+			uci set dhcp.lan.dhcpv6="server"
+			uci delete dhcp.lan.ndp 2>/dev/null
+		fi
 	fi
 
 	uci commit dhcp
 	/etc/init.d/odhcpd restart 2>/dev/null || true
+	[ "$enabled" = "1" ] && log "DHCPv6 Relay configured successfully."
 }
 
 restore_network_config() {
@@ -690,12 +679,12 @@ cmd_start() {
 	}
 	
 	if [ "$DHCPV6_RELAY" = "1" ]; then
-		setup_dhcpv6_relay "$WAN6_IFACE" || {
+		configure_dhcpv6_relay "$WAN6_IFACE" 1 || {
 			fail_start "DHCPv6 relay setup failed."
 			return 1
 		}
 	else
-		disable_dhcpv6_relay "$WAN6_IFACE" || {
+		configure_dhcpv6_relay "$WAN6_IFACE" 0 || {
 			fail_start "DHCPv6 relay disable failed."
 			return 1
 		}
