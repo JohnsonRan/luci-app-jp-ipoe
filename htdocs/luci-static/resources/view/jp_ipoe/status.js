@@ -95,34 +95,32 @@ return view.extend({
 				try {
 					var data = JSON.parse(res.stdout);
 					
-					var setField = function(id, text, isOk) {
+					var setField = function(id, text, isOk, isBold) {
 						var el = document.getElementById(id);
 						if (el) {
 							el.textContent = text || '-';
 							el.style.color = '';
 							el.style.fontWeight = 'normal';
+							if (isBold === true) el.style.fontWeight = 'bold';
 							if (isOk === true) el.style.color = '#4caf50';
 							if (isOk === false) el.style.color = '#f44336';
 						}
 					};
 
-					setField('s-wan6-iface', data.wan6_iface || '-');
-					setField('s-wan6-device', data.wan6_device || '-');
-					setField('s-wan6-ipv6', data.wan6_ipv6 || _('Not connected'), !!data.wan6_ipv6);
-					setField('s-mape-iface', data.mape_iface || '-');
-					
-					var st = document.getElementById('s-mape-state');
-					if (st) {
-						st.textContent = data.mape_state || 'down';
-						st.style.fontWeight = 'bold';
-						st.style.color = data.mape_state === 'up' ? '#4caf50' : '#f44336';
-					}
-
-					setField('s-mape-ipv4', data.mape_ipv4 || _('Not assigned'), !!data.mape_ipv4);
-					setField('s-br-addr', data.br_addr || _('Not set'), !!data.br_addr);
-					setField('s-port-info', data.port_info || '-');
-					setField('s-restore-state', data.has_restore_state ? _('Available') : _('None'), !!data.has_restore_state);
-					setField('s-pppoe-metric', data.pppoe_fallback_metrics || _('None'));
+					[
+						{ id: 's-wan6-iface', text: data.wan6_iface || '-' },
+						{ id: 's-wan6-device', text: data.wan6_device || '-' },
+						{ id: 's-wan6-ipv6', text: data.wan6_ipv6 || _('Not connected'), ok: !!data.wan6_ipv6 },
+						{ id: 's-mape-iface', text: data.mape_iface || '-' },
+						{ id: 's-mape-state', text: data.mape_state || 'down', ok: data.mape_state === 'up', bold: true },
+						{ id: 's-mape-ipv4', text: data.mape_ipv4 || _('Not assigned'), ok: !!data.mape_ipv4 },
+						{ id: 's-br-addr', text: data.br_addr || _('Not set'), ok: !!data.br_addr },
+						{ id: 's-port-info', text: data.port_info || '-' },
+						{ id: 's-restore-state', text: data.has_restore_state ? _('Available') : _('None'), ok: !!data.has_restore_state },
+						{ id: 's-pppoe-metric', text: data.pppoe_fallback_metrics || _('None') }
+					].forEach(function(field) {
+						setField(field.id, field.text, field.ok, field.bold);
+					});
 				} catch(e) {
 					var msg = document.getElementById('action-msg');
 					if(msg) msg.textContent = _('Failed to parse status');

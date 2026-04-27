@@ -307,6 +307,33 @@ setup_wan6() {
 	log "WAN6 interface $iface configured"
 }
 
+resolve_br_addr() {
+	local wan6_iface="$1"
+	local br_addr="$2"
+	local legacymap="$3"
+	local rule_data
+
+	if [ -n "$br_addr" ]; then
+		printf '%s' "$br_addr"
+		return 0
+	fi
+
+	log "BR address not set, trying to detect via mapcalc..."
+	rule_data=$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)
+	if [ $? -eq 0 ] && [ -n "$rule_data" ]; then
+		br_addr="$(sh "$JP_IPOE_INFO_HELPER" lookup_br "$wan6_iface" "$legacymap" 2>/dev/null)"
+		if [ -n "$br_addr" ]; then
+			log "Detected BR address: $br_addr"
+			printf '%s' "$br_addr"
+			return 0
+		fi
+	fi
+
+	log_err "BR address is empty. OCN Virtual Connect requires manual parameters if PD DHCP is disabled."
+	log_err "Please use the map-e calculator (http://ipv4.web.fc2.com/map-e.html) and fill in the BR Address and other parameters in LuCI."
+	return 1
+}
+
 # Configure MAP-E interface via UCI
 setup_mape() {
 	local mape_iface="$1"
@@ -319,22 +346,7 @@ setup_mape() {
 		proto maptype peeraddr tunlink encaplimit legacymap ipaddr \
 		ip4prefixlen ip6prefix ip6prefixlen ealen psidlen offset
 
-	# If no BR address provided, try to detect from mapcalc
-	if [ -z "$br_addr" ]; then
-		log "BR address not set, trying to detect via mapcalc..."
-		local rule_data
-		rule_data=$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)
-		if [ $? -eq 0 ] && [ -n "$rule_data" ]; then
-			br_addr="$(sh "$JP_IPOE_INFO_HELPER" lookup_br "$wan6_iface" "$legacymap" 2>/dev/null)"
-			log "Detected BR address: $br_addr"
-		fi
-	fi
-
-	if [ -z "$br_addr" ]; then
-		log_err "BR address is empty. OCN Virtual Connect requires manual parameters if PD DHCP is disabled."
-		log_err "Please use the map-e calculator (http://ipv4.web.fc2.com/map-e.html) and fill in the BR Address and other parameters in LuCI."
-		return 1
-	fi
+	br_addr="$(resolve_br_addr "$wan6_iface" "$br_addr" "$legacymap")" || return 1
 
 	# Create/update MAP-E interface
 	local exists=$(uci -q get network."$mape_iface" 2>/dev/null)
