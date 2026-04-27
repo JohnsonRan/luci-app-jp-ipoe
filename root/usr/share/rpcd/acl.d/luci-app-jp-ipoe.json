@@ -3,18 +3,15 @@
     "description": "Grant access to JP IPoE (OCN MAP-E) configuration",
     "read": {
       "file": {
-        "/usr/sbin/jp-ipoe-setup": [ "exec" ],
-        "/etc/init.d/jp_ipoe": [ "exec" ],
-        "/tmp/jp-ipoe.log": [ "read" ]
+        "/usr/sbin/jp-ipoe-setup": [ "exec" ]
       },
-      "uci": [ "jp_ipoe", "network", "firewall" ]
+      "uci": [ "jp_ipoe" ]
     },
     "write": {
       "file": {
-        "/usr/sbin/jp-ipoe-setup": [ "exec" ],
-        "/etc/init.d/jp_ipoe": [ "exec" ]
+        "/usr/sbin/jp-ipoe-setup": [ "exec" ]
       },
-      "uci": [ "jp_ipoe", "network", "firewall" ]
+      "uci": [ "jp_ipoe" ]
     }
   }
 }

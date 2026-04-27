@@ -11,6 +11,7 @@
 #
 
 . /lib/functions.sh
+. /usr/share/jp-ipoe/config.sh
 . /usr/libexec/jp-ipoe-state
 
 LOG_TAG="jp-ipoe"
@@ -136,24 +137,6 @@ list_has_item() {
 	done
 
 	return 1
-}
-
-# Load UCI config
-load_config() {
-	config_load jp_ipoe
-	config_get WAN_DEVICE  config wan_device  "eth0"
-	config_get WAN6_IFACE  config wan6_iface  "wan6"
-	config_get MAPE_IFACE  config mape_iface  "wan6mape"
-	config_get BR_ADDR     config br_addr     ""
-	config_get IPADDR      config ipaddr      ""
-	config_get IP4PREFIXLEN config ip4prefixlen "20"
-	config_get IP6PREFIX   config ip6prefix   ""
-	config_get IP6PREFIXLEN config ip6prefixlen "38"
-	config_get EALEN       config ealen       "42"
-	config_get PSIDLEN     config psidlen     "6"
-	config_get OFFSET      config offset      "4"
-	config_get LEGACYMAP   config legacymap   "1"
-	config_get DHCPV6_RELAY config dhcpv6_relay "1"
 }
 
 # Wait for WAN6 to get an IPv6 address (with timeout)
@@ -619,18 +602,18 @@ fail_start() {
 }
 
 cmd_status() {
-	load_config
+	jp_ipoe_config_load
 	sh "$JP_IPOE_INFO_HELPER" status "$WAN6_IFACE" "$MAPE_IFACE" "$BR_ADDR"
 }
 
 cmd_detect_br() {
-	load_config
+	jp_ipoe_config_load
 	sh "$JP_IPOE_INFO_HELPER" detect_br "$WAN6_IFACE" "$LEGACYMAP"
 }
 
 # Main start command
 cmd_start() {
-	load_config
+	jp_ipoe_config_load
 
 	log "Starting JP IPoE setup (OCN MAP-E)..."
 	log "WAN device: $WAN_DEVICE, WAN6: $WAN6_IFACE, MAP-E: $MAPE_IFACE"
@@ -717,7 +700,7 @@ cmd_start() {
 
 # Stop / teardown
 cmd_stop() {
-	load_config
+	jp_ipoe_config_load
 	resolve_restore_targets
 
 	log "Stopping JP IPoE interfaces..."
