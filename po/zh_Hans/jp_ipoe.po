@@ -67,11 +67,11 @@ msgstr "配置"
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:11
 msgid ""
-"Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin will "
-"automatically set up IPv6 WAN (DHCPv6) and MAP-E tunnel interfaces."
+"Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin uses an "
+"existing IPv6 WAN (DHCPv6) interface and manages the MAP-E tunnel settings."
 msgstr ""
-"配置 OCN バーチャルコネクト（MAP-E）IPoE 连接。此插件将自动配置 IPv6 WAN"
-"（DHCPv6）和 MAP-E 隧道接口。"
+"配置 OCN バーチャルコネクト（MAP-E）IPoE 连接。此插件使用已有的 IPv6 WAN"
+"（DHCPv6）接口并管理 MAP-E 隧道设置。"
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:136
 msgid "Detecting BR address via mapcalc..."
@@ -197,8 +197,8 @@ msgid "Mapped IPv6 prefix (e.g. 2400:4050::)."
 msgstr "计算出的 IPv6 前缀"
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:23
-msgid "Name for the DHCPv6 interface to be created (default: wan6)."
-msgstr "将要创建的 DHCPv6 接口名称（默认：wan6）。"
+msgid "Name of the existing DHCPv6 interface to use (default: wan6)."
+msgstr "要使用的已有 DHCPv6 接口名称（默认：wan6）。"
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:27
 msgid "Name for the MAP-E tunnel interface (default: wan6mape)."

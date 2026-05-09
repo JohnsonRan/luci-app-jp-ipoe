@@ -9,14 +9,20 @@ return view.extend({
 		var m, s, o;
 		var formatCommandOutput = function(res) {
 			var output = (res.stderr || res.stdout || '').trim();
+			var errors = output.split(/\n/).filter(function(line) {
+				return line.indexOf('ERROR:') === 0;
+			});
+
+			if (errors.length)
+				return _('Setup script exited with code: ') + res.code + '\n' + errors.join('\n');
 
 			if (output)
-				return _('Setup script exited with code: ') + res.code + '\n' + output;
+				return _('Setup script exited with code: ') + res.code + '\n' + output.split(/\n/).slice(-8).join('\n');
 
 			return _('Setup script exited with code: ') + res.code;
 		};
 
-		m = new form.Map('jp_ipoe', _('JP IPoE Configuration'), _('Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin will automatically set up IPv6 WAN (DHCPv6) and MAP-E tunnel interfaces.'));
+		m = new form.Map('jp_ipoe', _('JP IPoE Configuration'), _('Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin uses an existing IPv6 WAN (DHCPv6) interface and manages the MAP-E tunnel settings.'));
 
 		s = m.section(form.NamedSection, 'config', 'jp_ipoe', _('Settings'));
 		s.addremove = false;
@@ -28,7 +34,7 @@ return view.extend({
 		o.default = 'eth0';
 		o.datatype = 'string';
 
-		o = s.option(form.Value, 'wan6_iface', _('IPv6 WAN Interface Name'), _('Name for the DHCPv6 interface to be created (default: wan6).'));
+		o = s.option(form.Value, 'wan6_iface', _('IPv6 WAN Interface Name'), _('Name of the existing DHCPv6 interface to use (default: wan6).'));
 		o.default = 'wan6';
 		o.datatype = 'string';
 

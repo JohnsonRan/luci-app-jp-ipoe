@@ -471,11 +471,8 @@ setup_firewall() {
 	uci commit firewall
 }
 
-# Install the patched map.sh
-install_map_sh() {
+validate_map_protocol() {
 	local our_map="/lib/netifd/proto/map.sh"
-	local backup="/lib/netifd/proto/map.sh.orig"
-	local patched_src="/usr/share/jp-ipoe/map.sh"
 	local helper="/usr/libexec/jp-ipoe-map-nft"
 	local state_helper="/usr/libexec/jp-ipoe-state"
 	local info_helper="/usr/libexec/jp-ipoe-info"
@@ -495,38 +492,13 @@ install_map_sh() {
 		return 1
 	fi
 
-	if [ -f "$our_map" ]; then
-		# Backup original only if it is not already our managed version.
-		if ! grep -q "JP_IPOE_PATCH_VERSION=" "$our_map" 2>/dev/null; then
-			cp "$our_map" "$backup"
-			log "Backed up original map.sh to $backup"
-		fi
-	fi
-
-	if [ -f "$patched_src" ]; then
-		if cmp -s "$patched_src" "$our_map" 2>/dev/null; then
-			log "Patched map.sh already installed"
-		else
-			cp -f "$patched_src" "$our_map"
-			chmod +x "$our_map"
-			log "Installed optimized patched map.sh (per-interface nftables multi-port SNAT)"
-		fi
-	else
-		log_err "Patched map.sh not found at $patched_src"
+	if ! grep -q "JP_IPOE_PATCH_VERSION=" "$our_map" 2>/dev/null; then
+		log_err "Patched MAP-E protocol script is not installed at $our_map"
+		log_err "Please reinstall the package or run /usr/libexec/jp-ipoe-install-map."
 		return 1
 	fi
-}
 
-restore_map_sh() {
-	local our_map="/lib/netifd/proto/map.sh"
-	local backup="/lib/netifd/proto/map.sh.orig"
-
-	[ -f "$backup" ] || return 0
-	grep -q "JP_IPOE_PATCH_VERSION=" "$our_map" 2>/dev/null || return 0
-
-	cp -f "$backup" "$our_map"
-	chmod +x "$our_map"
-	log "Restored original map.sh from $backup"
+	log "Patched MAP-E protocol script is installed."
 }
 
 # Configure DHCPv6 / Router Advertisement Relay
@@ -628,23 +600,103 @@ restore_firewall_config() {
 	fw4 reload 2>/dev/null || true
 }
 
-rollback_failed_start() {
-	log_err "Start failed, restoring previous configuration."
-	resolve_restore_targets
+stop_managed_interfaces() {
 	ifdown "$RESTORE_MAPE_IFACE" 2>/dev/null || true
 	ifdown "$RESTORE_WAN6_IFACE" 2>/dev/null || true
+}
+
+restore_managed_config() {
 	restore_network_config "$RESTORE_WAN6_IFACE" "$RESTORE_MAPE_IFACE" "$WAN_DEVICE"
 	restore_pppoe_fallback_metrics
 	restore_dhcp_config "$RESTORE_WAN6_IFACE"
 	restore_firewall_config
-	restore_map_sh
+}
+
+clear_runtime_state() {
 	jp_ipoe_state_clear
+}
+
+rollback_failed_start() {
+	log_err "Start failed, restoring previous configuration."
+	resolve_restore_targets
+	stop_managed_interfaces
+	restore_managed_config
+	clear_runtime_state
 }
 
 fail_start() {
 	log_err "$1"
 	rollback_failed_start
 	return 1
+}
+
+validate_config() {
+	[ -n "$WAN_DEVICE" ] || {
+		log_err "WAN physical device is not configured."
+		return 1
+	}
+
+	[ -n "$WAN6_IFACE" ] || {
+		log_err "WAN6 interface name is not configured."
+		return 1
+	}
+
+	if ! uci -q get network."$WAN6_IFACE" >/dev/null 2>&1; then
+		log_err "WAN6 interface $WAN6_IFACE does not exist. Please create it before starting JP IPoE."
+		return 1
+	fi
+
+	[ -n "$MAPE_IFACE" ] || {
+		log_err "MAP-E interface name is not configured."
+		return 1
+	}
+}
+
+apply_map_protocol() {
+	validate_map_protocol
+}
+
+apply_network_config() {
+	local wan6_dev
+	local ipv6_addr
+
+	ensure_wan_device_ipv6 "$WAN_DEVICE" || return 1
+	setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE" "" || return 1
+
+	ifup "$WAN6_IFACE" 2>/dev/null || true
+	sleep 3
+
+	wan6_dev=$(uci -q get network."$WAN6_IFACE".device 2>/dev/null)
+	[ -z "$wan6_dev" ] && wan6_dev="$WAN_DEVICE"
+
+	ipv6_addr=$(wait_for_ipv6 "$wan6_dev" 60) || return 1
+	[ -n "$ipv6_addr" ] || return 1
+
+	ensure_wan6_ip6prefix "$WAN6_IFACE" "$wan6_dev" || return 1
+	setup_mape "$MAPE_IFACE" "$WAN6_IFACE" "$BR_ADDR" "$LEGACYMAP"
+}
+
+apply_firewall_config() {
+	setup_firewall "$WAN6_IFACE" "$MAPE_IFACE" || return 1
+	setup_pppoe_fallback_metrics
+}
+
+apply_dhcp_config() {
+	if [ "$DHCPV6_RELAY" = "1" ]; then
+		configure_dhcpv6_relay "$WAN6_IFACE" 1
+	else
+		configure_dhcpv6_relay "$WAN6_IFACE" 0
+	fi
+}
+
+bringup_mape() {
+	log "Bringing up MAP-E interface..."
+	ifdown "$MAPE_IFACE" 2>/dev/null || true
+	sleep 1
+	ifup "$MAPE_IFACE" 2>/dev/null || true
+
+	log "Reloading firewall..."
+	fw4 reload 2>/dev/null || true
 }
 
 cmd_status() {
@@ -663,87 +715,35 @@ cmd_start() {
 
 	log "Starting JP IPoE setup (OCN MAP-E)..."
 	log "WAN device: $WAN_DEVICE, WAN6: $WAN6_IFACE, MAP-E: $MAPE_IFACE"
+
+	validate_config || {
+		log_err "Configuration validation failed."
+		return 1
+	}
+
+	apply_map_protocol || {
+		log_err "MAP-E protocol validation failed."
+		return 1
+	}
+
 	jp_ipoe_state_snapshot_session_metadata "$WAN6_IFACE" "$MAPE_IFACE"
 
-	# Step 1: Install patched map.sh
-	install_map_sh || {
-		fail_start "map.sh installation failed."
+	apply_network_config || {
+		fail_start "Network interface setup failed."
 		return 1
 	}
 
-	# Step 2: Always converge WAN6 onto the required DHCPv6 settings.
-	ensure_wan_device_ipv6 "$WAN_DEVICE" || {
-		fail_start "WAN device IPv6 setup failed."
+	apply_firewall_config || {
+		fail_start "Firewall or PPPoE metric setup failed."
 		return 1
 	}
 
-	setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE" "" || {
-		fail_start "WAN6 interface setup failed."
+	apply_dhcp_config || {
+		fail_start "DHCPv6 relay setup failed."
 		return 1
 	}
 
-	# Always ensure WAN6 is up before we wait for its IP
-	ifup "$WAN6_IFACE" 2>/dev/null || true
-	sleep 3
-
-	# Step 3: Wait for WAN6 to get an IPv6 address
-	local wan6_dev
-	wan6_dev=$(uci -q get network."$WAN6_IFACE".device 2>/dev/null)
-	[ -z "$wan6_dev" ] && wan6_dev="$WAN_DEVICE"
-
-	local ipv6_addr
-	ipv6_addr=$(wait_for_ipv6 "$wan6_dev" 60)
-	if [ $? -ne 0 ]; then
-		fail_start "WAN6 did not get an IPv6 address."
-		return 1
-	fi
-
-	# Step 4: Seed wan6 with a /64 ip6prefix only when MAP-E depends on it.
-	# Pure auto-PD setups keep the delegated prefix untouched.
-	ensure_wan6_ip6prefix "$WAN6_IFACE" "$wan6_dev" || {
-		fail_start "Failed to prepare WAN6 ip6prefix for MAP-E startup."
-		return 1
-	}
-
-	# Step 5: Setup MAP-E interface
-	setup_mape "$MAPE_IFACE" "$WAN6_IFACE" "$BR_ADDR" "$LEGACYMAP"
-	if [ $? -ne 0 ]; then
-		fail_start "MAP-E interface setup failed."
-		return 1
-	fi
-
-	# Step 6: Configure firewall and DHCPv6 relay
-	setup_firewall "$WAN6_IFACE" "$MAPE_IFACE"
-	if [ $? -ne 0 ]; then
-		fail_start "Firewall zone setup failed."
-		return 1
-	fi
-
-	setup_pppoe_fallback_metrics || {
-		fail_start "PPPoE fallback metric setup failed."
-		return 1
-	}
-	
-	if [ "$DHCPV6_RELAY" = "1" ]; then
-		configure_dhcpv6_relay "$WAN6_IFACE" 1 || {
-			fail_start "DHCPv6 relay setup failed."
-			return 1
-		}
-	else
-		configure_dhcpv6_relay "$WAN6_IFACE" 0 || {
-			fail_start "DHCPv6 relay disable failed."
-			return 1
-		}
-	fi
-
-	# Step 7: Bring up MAP-E interface to apply patched script, then reload firewall
-	log "Bringing up MAP-E interface..."
-	ifdown "$MAPE_IFACE" 2>/dev/null || true
-	sleep 1
-	ifup "$MAPE_IFACE" 2>/dev/null || true
-
-	log "Reloading firewall..."
-	fw4 reload 2>/dev/null || true
+	bringup_mape
 
 	log "JP IPoE setup complete!"
 	return 0
@@ -755,14 +755,9 @@ cmd_stop() {
 	resolve_restore_targets
 
 	log "Stopping JP IPoE interfaces..."
-	ifdown "$RESTORE_MAPE_IFACE" 2>/dev/null || true
-	ifdown "$RESTORE_WAN6_IFACE" 2>/dev/null || true
-	restore_network_config "$RESTORE_WAN6_IFACE" "$RESTORE_MAPE_IFACE" "$WAN_DEVICE"
-	restore_pppoe_fallback_metrics
-	restore_dhcp_config "$RESTORE_WAN6_IFACE"
-	restore_firewall_config
-	restore_map_sh
-	jp_ipoe_state_clear
+	stop_managed_interfaces
+	restore_managed_config
+	clear_runtime_state
 	log "Done."
 }
 

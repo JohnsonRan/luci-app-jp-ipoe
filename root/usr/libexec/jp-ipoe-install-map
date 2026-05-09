@@ -1,0 +1,19 @@
+#!/bin/sh
+
+TARGET="/lib/netifd/proto/map.sh"
+BACKUP="/lib/netifd/proto/map.sh.orig"
+SOURCE="/usr/share/jp-ipoe/map.sh"
+
+[ -f "$SOURCE" ] || {
+	echo "ERROR: Patched map.sh not found at $SOURCE" >&2
+	exit 1
+}
+
+[ -d "$(dirname "$TARGET")" ] || mkdir -p "$(dirname "$TARGET")"
+
+if [ -f "$TARGET" ] && ! grep -q "JP_IPOE_PATCH_VERSION=" "$TARGET" 2>/dev/null; then
+	cp "$TARGET" "$BACKUP" || exit 1
+fi
+
+cp -f "$SOURCE" "$TARGET" || exit 1
+chmod +x "$TARGET" || exit 1
