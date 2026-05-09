@@ -7,6 +7,14 @@
 return view.extend({
 	render: function() {
 		var m, s, o;
+		var formatCommandOutput = function(res) {
+			var output = (res.stderr || res.stdout || '').trim();
+
+			if (output)
+				return _('Setup script exited with code: ') + res.code + '\n' + output;
+
+			return _('Setup script exited with code: ') + res.code;
+		};
 
 		m = new form.Map('jp_ipoe', _('JP IPoE Configuration'), _('Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin will automatically set up IPv6 WAN (DHCPv6) and MAP-E tunnel interfaces.'));
 
@@ -96,7 +104,7 @@ return view.extend({
 									if (res.code === 0)
 										ui.addNotification(null, E('p', _('IPoE configuration applied.')), 'info');
 									else
-										ui.addNotification(null, E('p', _('Setup script exited with code: ') + res.code), 'error');
+										ui.addNotification(null, E('pre', {}, formatCommandOutput(res)), 'error');
 								}).catch(function(e) {
 									ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
 								});
@@ -107,7 +115,10 @@ return view.extend({
 							class: 'btn cbi-button cbi-button-negative',
 							click: ui.createHandlerFn(this, function() {
 								return fs.exec('/usr/sbin/jp-ipoe-setup', ['stop']).then(function(res) {
-									ui.addNotification(null, E('p', _('IPoE interfaces stopped.')), 'info');
+									if (res.code === 0)
+										ui.addNotification(null, E('p', _('IPoE interfaces stopped.')), 'info');
+									else
+										ui.addNotification(null, E('pre', {}, formatCommandOutput(res)), 'error');
 								}).catch(function(e) {
 									ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
 								});

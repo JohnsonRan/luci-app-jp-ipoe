@@ -309,10 +309,10 @@ setup_wan6() {
 	jp_ipoe_state_snapshot_uci_section network "$iface" "network_${iface}" \
 		device proto reqaddress reqprefix ip6assign ip6prefix
 
-	# Check if iface already exists
 	local exists=$(uci -q get network."$iface" 2>/dev/null)
 	if [ -z "$exists" ]; then
-		uci set network."$iface"=interface
+		log_err "WAN6 interface $iface does not exist. Please create it before starting JP IPoE."
+		return 1
 	fi
 
 	uci set network."$iface".device="$device"
