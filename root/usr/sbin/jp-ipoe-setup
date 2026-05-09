@@ -40,6 +40,7 @@ resolve_restore_targets() {
 
 FIREWALL_ZONE_MATCH=""
 PPPOE_SECTION_MATCHES=""
+NETWORK_DEVICE_MATCH=""
 
 firewall_zone_find_by_name_cb() {
 	local section="$1"
@@ -125,6 +126,29 @@ find_pppoe_sections() {
 	PPPOE_SECTION_MATCHES=""
 	config_foreach pppoe_section_collect_cb interface
 	printf '%s' "$PPPOE_SECTION_MATCHES"
+}
+
+network_device_find_by_name_cb() {
+	local section="$1"
+	local target_name="$2"
+	local name
+
+	[ -n "$NETWORK_DEVICE_MATCH" ] && return 0
+	config_get name "$section" name ""
+	[ "$name" = "$target_name" ] && NETWORK_DEVICE_MATCH="$section"
+}
+
+find_network_device_section() {
+	local target_name="$1"
+
+	[ -n "$target_name" ] || return 1
+	config_load network
+
+	NETWORK_DEVICE_MATCH=""
+	config_foreach network_device_find_by_name_cb device "$target_name"
+	[ -n "$NETWORK_DEVICE_MATCH" ] || return 1
+
+	printf '%s' "$NETWORK_DEVICE_MATCH"
 }
 
 list_has_item() {
@@ -220,6 +244,20 @@ get_ipv6_prefix() {
 	log "IPv6 /64 prefix from address fallback: $p64"
 	echo "$p64"
 	return 0
+}
+
+ensure_wan_device_ipv6() {
+	local device="$1"
+	local section
+
+	section="$(find_network_device_section "$device")" || {
+		log "No explicit network device section found for $device; leaving device IPv6 setting unchanged."
+		return 0
+	}
+
+	jp_ipoe_state_snapshot_uci_section network "$section" "network_device_${section}" name ipv6
+	uci set network."$section".ipv6="1"
+	log "Enabled IPv6 on device $device."
 }
 
 # MAP-E still needs wan6.ip6prefix when relay mode is enabled or when the
@@ -502,8 +540,8 @@ configure_dhcpv6_relay() {
 		log "DHCPv6 Relay disabled, restoring standard server mode for lan..."
 	fi
 
-	jp_ipoe_state_snapshot_uci_section dhcp "$wan6_iface" "dhcp_${wan6_iface}" interface master ra dhcpv6 ndp
-	jp_ipoe_state_snapshot_uci_section dhcp "lan" "dhcp_lan" ra dhcpv6 ndp
+	jp_ipoe_state_snapshot_uci_section dhcp "$wan6_iface" "dhcp_${wan6_iface}" interface master ra dhcpv6 ndp ndproxy_routing
+	jp_ipoe_state_snapshot_uci_section dhcp "lan" "dhcp_lan" master ra dhcpv6 ndp
 
 	# Ensure dhcp.wan6 exists
 	local wan6_dhcp=$(uci -q get dhcp."$wan6_iface" 2>/dev/null)
@@ -517,16 +555,19 @@ configure_dhcpv6_relay() {
 		uci set dhcp."$wan6_iface".ra="relay"
 		uci set dhcp."$wan6_iface".dhcpv6="relay"
 		uci set dhcp."$wan6_iface".ndp="relay"
+		uci set dhcp."$wan6_iface".ndproxy_routing="1"
 	else
 		uci delete dhcp."$wan6_iface".master 2>/dev/null
 		uci set dhcp."$wan6_iface".ra="disabled"
 		uci set dhcp."$wan6_iface".dhcpv6="disabled"
 		uci set dhcp."$wan6_iface".ndp="disabled"
+		uci delete dhcp."$wan6_iface".ndproxy_routing 2>/dev/null
 	fi
 
 	local lan_dhcp=$(uci -q get dhcp.lan 2>/dev/null)
 	if [ -n "$lan_dhcp" ]; then
 		if [ "$enabled" = "1" ]; then
+			uci delete dhcp.lan.master 2>/dev/null
 			uci set dhcp.lan.ra="relay"
 			uci set dhcp.lan.dhcpv6="relay"
 			uci set dhcp.lan.ndp="relay"
@@ -545,12 +586,17 @@ configure_dhcpv6_relay() {
 restore_network_config() {
 	local wan6_iface="$1"
 	local mape_iface="$2"
+	local wan_device="$3"
+	local device_section
 
 	jp_ipoe_state_restore_uci_section network "$mape_iface" "network_${mape_iface}" \
 		proto maptype peeraddr tunlink encaplimit legacymap ipaddr \
 		ip4prefixlen ip6prefix ip6prefixlen ealen psidlen offset
 	jp_ipoe_state_restore_uci_section network "$wan6_iface" "network_${wan6_iface}" \
 		device proto reqaddress reqprefix ip6assign ip6prefix
+	if device_section="$(find_network_device_section "$wan_device")"; then
+		jp_ipoe_state_restore_uci_section network "$device_section" "network_device_${device_section}" name ipv6
+	fi
 	uci commit network
 }
 
@@ -570,8 +616,8 @@ restore_pppoe_fallback_metrics() {
 restore_dhcp_config() {
 	local wan6_iface="$1"
 
-	jp_ipoe_state_restore_uci_section dhcp "$wan6_iface" "dhcp_${wan6_iface}" interface master ra dhcpv6 ndp
-	jp_ipoe_state_restore_uci_section dhcp "lan" "dhcp_lan" ra dhcpv6 ndp
+	jp_ipoe_state_restore_uci_section dhcp "$wan6_iface" "dhcp_${wan6_iface}" interface master ra dhcpv6 ndp ndproxy_routing
+	jp_ipoe_state_restore_uci_section dhcp "lan" "dhcp_lan" master ra dhcpv6 ndp
 	uci commit dhcp
 	/etc/init.d/odhcpd restart 2>/dev/null || true
 }
@@ -587,7 +633,7 @@ rollback_failed_start() {
 	resolve_restore_targets
 	ifdown "$RESTORE_MAPE_IFACE" 2>/dev/null || true
 	ifdown "$RESTORE_WAN6_IFACE" 2>/dev/null || true
-	restore_network_config "$RESTORE_WAN6_IFACE" "$RESTORE_MAPE_IFACE"
+	restore_network_config "$RESTORE_WAN6_IFACE" "$RESTORE_MAPE_IFACE" "$WAN_DEVICE"
 	restore_pppoe_fallback_metrics
 	restore_dhcp_config "$RESTORE_WAN6_IFACE"
 	restore_firewall_config
@@ -626,6 +672,11 @@ cmd_start() {
 	}
 
 	# Step 2: Always converge WAN6 onto the required DHCPv6 settings.
+	ensure_wan_device_ipv6 "$WAN_DEVICE" || {
+		fail_start "WAN device IPv6 setup failed."
+		return 1
+	}
+
 	setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE" "" || {
 		fail_start "WAN6 interface setup failed."
 		return 1
@@ -706,7 +757,7 @@ cmd_stop() {
 	log "Stopping JP IPoE interfaces..."
 	ifdown "$RESTORE_MAPE_IFACE" 2>/dev/null || true
 	ifdown "$RESTORE_WAN6_IFACE" 2>/dev/null || true
-	restore_network_config "$RESTORE_WAN6_IFACE" "$RESTORE_MAPE_IFACE"
+	restore_network_config "$RESTORE_WAN6_IFACE" "$RESTORE_MAPE_IFACE" "$WAN_DEVICE"
 	restore_pppoe_fallback_metrics
 	restore_dhcp_config "$RESTORE_WAN6_IFACE"
 	restore_firewall_config
