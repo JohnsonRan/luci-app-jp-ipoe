@@ -276,6 +276,68 @@ ensure_wan_device_ipv6() {
 	log "Enabled IPv6 on device $device."
 }
 
+normalize_hex_id() {
+	printf '%s' "$1" | tr 'A-F' 'a-f' | tr -d ':-'
+}
+
+get_device_mac() {
+	local device="$1"
+	local mac
+
+	[ -n "$device" ] || return 1
+	[ -r "/sys/class/net/$device/address" ] || return 1
+
+	mac="$(cat "/sys/class/net/$device/address" 2>/dev/null)"
+	mac="$(normalize_hex_id "$mac")"
+
+	case "$mac" in
+		????????????)
+			case "$mac" in
+				*[!0-9a-f]*) return 1 ;;
+			esac
+			printf '%s' "$mac"
+			return 0
+			;;
+	esac
+
+	return 1
+}
+
+ensure_wan6_duid_ll() {
+	local iface="$1"
+	local device="$2"
+	local mac
+	local expected_duid
+	local current_duid
+	local global_duid
+	local normalized_current
+	local normalized_global
+
+	mac="$(get_device_mac "$device")" || {
+		log_err "Unable to read MAC address for WAN device $device; cannot generate DHCPv6 DUID-LL."
+		return 1
+	}
+
+	expected_duid="00030001$mac"
+	current_duid="$(uci -q get network."$iface".clientid 2>/dev/null)"
+	global_duid="$(uci -q get network.globals.dhcp_default_duid 2>/dev/null)"
+	normalized_current="$(normalize_hex_id "$current_duid")"
+	normalized_global="$(normalize_hex_id "$global_duid")"
+
+	if [ "$normalized_current" = "$expected_duid" ]; then
+		log "$iface DHCPv6 client ID already uses DUID-LL for $device."
+		return 0
+	fi
+
+	if [ -z "$normalized_current" ] && [ "$normalized_global" = "$expected_duid" ]; then
+		log "Global DHCPv6 default DUID already uses DUID-LL for $device."
+		return 0
+	fi
+
+	log "Setting $iface DHCPv6 client ID to DUID-LL for $device."
+	uci set network."$iface".clientid="$expected_duid"
+}
+
 # MAP-E still needs wan6.ip6prefix when relay mode is enabled or when the
 # tunnel is being driven by manual MAP bounds / BR settings.
 wan6_ip6prefix_required() {
@@ -333,6 +395,7 @@ setup_wan6() {
 	uci set network."$iface".reqaddress=try
 	uci set network."$iface".reqprefix=auto
 	uci set network."$iface".ip6assign='64'
+	ensure_wan6_duid_ll "$iface" "$device" || return 1
 	uci delete network."$iface".ip6prefix 2>/dev/null || true
 
 	uci commit network
