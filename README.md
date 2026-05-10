@@ -1,124 +1,208 @@
-# **Configuring OpenWrt to work with Japan NTT IPv6 (MAP-E) service**
+# luci-app-jp-ipoe
+### This project is fully written by GPT 5.5, Tested by myself. Everything works like how it is.
+### Thanks to fakemanhk/openwrt-jp-ipoe, What a great tutorial!
+LuCI helper for Japan NTT IPoE MAP-E connections, focused on OCN Virtual Connect style setups.
 
 ## **The problem:**
 
 ISPs with NTT mostly support both IPv4 & IPv6 implementations, while former one usually by using PPPoE which can introduce higher latency, during peak hours it can be also very slow in some busy districts. IPv6 is their newly promoted way to connect to internet which doesn't require PPPoE (note there is no PPPoE for 10G plan, IPoE is the only option),  they also claim this is a much faster option, with IPv4 over IPv6 together users should retain traditional IPv4 connectivity. Unfortunately if you subscribe the internet service without using Hikari Denwa (ひかり電話) residential phone service, you will end up getting /64 prefix address as well as without router advertisement (RA), if you don't use vendor provided router it would be extremely difficult to set up your IPv6 network with IPv4 over IPv6 connectivity.
 
-There exist a few different implementations (DS-LITE/Transix/MAP-E)  in Japan, so not all providers can do the same way, here I am only referring to my own provider _**NTT ぷらら (plala**_**),** which is MAP-E implementation.
+## Do What:
 
-## **Setup**:
+- install and validate a patched `/lib/netifd/proto/map.sh`
+- configure an existing DHCPv6 WAN interface
+- set a NTT-compatible DHCPv6 DUID-LL client ID for WAN6
+- create and manage the MAP-E interface
+- add WAN6 and MAP-E to the WAN firewall zone
+- configure DHCPv6/RA/NDP relay for no-PD `/64` lines
+- generate nftables SNAT rules for all assigned MAP-E port ranges
+- optionally reserve fixed IPv4 ports so SNAT will not use them
+- lower PPPoE fallback priority by setting PPPoE metrics to `200`
+- show status and attempt BR address detection from LuCI
 
-The whole setup was first tested with **GL-INET MT1300 (beryl, v22.03.3)** and verified with **NanoPi R4S (4GB, v22.03.3)** as well as **Linksys WRT3200ACM (rango, v22.03.2)** and **Jetway NF9HG-N2930 (x86, v22.03.3)** on 1G plan.
+## Requirements
 
-In October 2023 I have verified this setup is also working with **Netgear WAX206 (v23.05.0)** on upgraded 10G plan.
+- OpenWrt 22.03 or newer with fw4/nftables
+- LuCI
+- `map` package
+- a working IPv6 WAN interface using DHCPv6, usually named `wan6`
 
-Note: I didn't notice that my upgraded 10G plan is slightly different from the original 1G plan, the old one comes with /64 prefix without prefix delegation (PD), while ***the 10G plan already give you /56 prefix with PD even you don't pay for the Hikari phone service!*** Here is a [discussion](https://github.com/fakemanhk/openwrt-jp-ipoe/discussions/27) about it.
+The package depends on `map`. On install, it also copies the bundled patched MAP protocol script to `/lib/netifd/proto/map.sh`. If an unpatched stock script already exists, it is backed up to `/lib/netifd/proto/map.sh.orig`.
 
+## Supported Scope
 
-*   **System > Software**: Install the required add-on package _**map**_ for MAP-E/MAP-T support, you will need to reboot before you can use it.
-*   Enable WAN6 with **DHCPv6**, firewall setting you probably need to add this to **WAN Zone** (same as IPv4 WAN) for protection.
+This plugin targets shared IPv4 MAP-E service over NTT IPoE, especially OCN Virtual Connect compatible lines.
 
-> Under **DHCP Server > IPv6** Setting, follow these settings:
-> 
-> *   Designated master ON
-> *   RA-Service: relay mode
-> *   DHCPv6-Service: relay mode
-> *   NDP-Proxy: relay mode
-> *   Learn routes: ON
+It is not a general static IPv4 IPoE implementation. If your ISP sells a dedicated static IPv4 service, that may use provider-specific behavior that cannot be derived from normal MAP-E parameters.
 
-![](https://user-images.githubusercontent.com/21307353/212850790-a2c4ac8b-3bed-4941-8f1a-49e9e5597c3f.png)
+## Quick Start
 
-Save & Apply setting, you should see a public IPv6 address being assigned to your _WAN6_ interface (usually starting with 2400)
+1. Install `luci-app-jp-ipoe`.
+2. Make sure `Network > Interfaces` already has a DHCPv6 WAN interface, usually `wan6`.
+3. Open `Network > JP IPoE > Configuration`.
+4. Set `WAN Physical Device` to the real WAN device, for example `eth0` or `eth1`.
+5. Keep `IPv6 WAN Interface Name` as `wan6` unless your interface uses another name.
+6. Keep `Use Legacy MAP` enabled for OCN Virtual Connect.
+7. Leave `BR Address` empty if you want the plugin to try `mapcalc` detection.
+8. Enable `DHCPv6/NDP Relay` if your line only receives a `/64` without prefix delegation.
+9. Click `Apply IPoE Configuration`.
 
-*   _WAN6_ interface also needs to add _**Routed Prefix Information**_ due to missing RA on WAN6 side (note: If your service plan comes with prefix delegation, like having Hikari phone service, or using some of the 10G internet plan, it could be coming with a shorter prefix like /60 or /56 together with PD, then this step can be ommited):
+After applying, check `Network > JP IPoE > Status`. A working setup should show:
 
-   * Use SSH to login router, edit **/etc/config/network,** add the line marked in _**Italics**_ under _WAN6_ interface section, note the _**2400:aaaa:bbbb:cccc**_ is your WAN IP prefix (first 64 bit), this will give the WAN6 interface proper IPv6-PD:
+- WAN6 has a global IPv6 address
+- MAP-E tunnel state is `up`
+- MAP-E has an IPv4 address
+- assigned port ranges are visible
 
-> config interface 'wan6'
-> 
->             option device 'eth1'
-> 
->             option proto 'dhcpv6'
-> 
->             option reqaddress 'try'
-> 
->             option reqprefix 'auto'
-> 
->             _**option ip6prefix '2400:aaaa:bbbb:cccc::/64'**_
+## Configuration Fields
 
-Note: Previously I had failed my setup because of missing this step, it wasn't mentioned in most resources I found on web, and I eventually got a _**MAP rule invalid**_ error.
+`Enable at Boot`
+: Runs the setup automatically during router startup.
 
-*   Next, configure LAN interface, under **DHCP Server > IPv6** settings, basically very similar to WAN6 but **Designated master OFF**
+`WAN Physical Device`
+: The physical WAN device used by the DHCPv6 interface. The plugin uses this device to enable IPv6 and generate a DUID-LL client ID.
 
-![](https://user-images.githubusercontent.com/21307353/212852863-7fb85f4e-a04c-4ed6-b936-2b71f2631019.png)
+`IPv6 WAN Interface Name`
+: Existing DHCPv6 interface to configure and use as the MAP-E tunnel link.
 
-You clients can probably get public IPv6 addresses (*) from router now! But this will be IPv6 access only and you are still missing the IPv4 connectivity, another MAP-E interface is required to fill the gap.
+`MAP-E Interface Name`
+: Managed MAP-E interface name. The default is `wan6mape`.
 
-(*) Some clients might not work with DHCPv6, and you'll need SLAAC, please refer to the discussion [here](https://github.com/fakemanhk/openwrt-jp-ipoe/discussions/2) to change the settings.
+`Use Legacy MAP`
+: Enables legacy MAP behavior. Keep this enabled for OCN Virtual Connect and typical NTT MAP-E setups.
 
+`BR Address`
+: Border Relay IPv6 address. If empty, the setup script tries to detect it with `mapcalc`.
 
-*   Before we create the MAP-E interface, the parameter calculation for MAP-E is needed, in reference section I have attached the IETF information but someone has created a page to calculate, you can copy the public IPv6 address from WAN6 interface and use this [online MAP-E rule calculator](http://ipv4.web.fc2.com/map-e.html):
+`IPv4 Prefix`, `IPv4 Prefix Length`, `IPv6 Prefix`, `IPv6 Prefix Length`, `EA bits length`, `PSID bits length`, `PSID offset`
+: Advanced manual MAP-E parameters. Leave empty unless auto-detection fails or your provider requires manually supplied values.
 
-![](https://user-images.githubusercontent.com/21307353/212853420-6ce2090f-98f1-4f34-9f44-4db2d3bbddca.png)
+`Reserved IPv4 Ports`
+: Space-separated ports that the SNAT helper must not use. This is useful when you intentionally reserve assigned MAP-E ports for inbound services.
 
-Note: Before I ran the above calculator, I used the Buffalo router that came with ISP to connect the internet service, logged into that router and from status page I can see that at least the IPv4 address and port numbers are the same as above, so I believe the parameters I get from the calculator should be correct, you might want to do this as a verification.
+`Enable DHCPv6/NDP Relay`
+: Enable for no-PD `/64` lines. Disable it when your line receives prefix delegation and you want normal LAN IPv6 server mode.
 
-*   Next will be setting up new MAP-E interface, create a new interface and name it (e.g. _WAN6MAPE_), and fill the parameters using above generated parameters:
-    *   Protocol: MAP/LW4over6
-    *   Type: MAP-E
-    *   BR/DMR/AFTR: _\[peeraddr\]_
-    *   IPv4 prefix: _\[ipaddr\]_
-    *   IPv4 prefix length: _\[ip4prefixlen\]_
-    *   IPv6 prefix: _\[ip6prefix\]_
-    *   IPv6 prefix length: _\[ip6prefixlen\]_
-    *   EA-bit length: _\[ealen\]_
-    *   PSID-bits length: _\[psidlen\]_
-    *   PSID offset: _\[offset\]_
-    *   From advanced settings, make sure it has **WAN6 as Tunnel Link**, and check the box **Use legacy MAP**:
+## What Apply Does
 
-![](https://user-images.githubusercontent.com/21307353/212856884-d6d627a4-37b9-4002-99a7-2795dccac2cd.png)
+Running `Apply IPoE Configuration` executes:
 
-Note: Don't forget to add this _WAN6MAPE_ interface to same firewall zone as WAN/WAN6 since this is also part of WAN.
+```sh
+/usr/sbin/jp-ipoe-setup start
+```
 
-## ADVANCED CUSTOM CONFIGURATION
+The setup script:
 
-MAP-E with IPv4 sharing from ISP is designed to share same IPv4 address with many customers, with different ports being assigned based on IETF rules, the above linked parameter calculator already shown the assigned ports, usually it's divided into groups of 16 ports, according to [this discussion](https://github.com/fakemanhk/openwrt-jp-ipoe/discussions/10) JPNE assigns 15 groups (240 ports), while OCN/plala assign 63 groups (1008 ports). In most cases this should be enough for most home uses (since only IPv4 connections will use them), however a recent test with well known IPv4 based [website](https://nichiban.co.jp) that uses many sessions showing a significant lagging while loading. After investigation the OpenWrt firewall statistics indicating only first group of assigned ports (i.e. only 16 ports) being used and this is the reason of lagging when a large number of simultaneous IPv4 sessions opening, also IPv4 PING is not working. Not sure if it's because Japan ISP MAP-E configuration has something MAP package can't deal with, as a result a system change is required for _**/lib/netifd/proto/map.sh.**_ 
+1. validates that the patched MAP protocol script is installed
+2. enables IPv6 on the WAN device when an explicit device section exists
+3. configures the WAN6 interface as DHCPv6
+4. checks the WAN6 DHCPv6 DUID
+5. waits for a global IPv6 address
+6. derives and sets `wan6.ip6prefix` when relay/manual MAP settings need it
+7. creates or updates the MAP-E interface
+8. adds WAN6 and MAP-E to the WAN firewall zone
+9. applies PPPoE fallback metrics if PPPoE interfaces exist
+10. configures DHCPv6/RA/NDP relay or restores standard LAN server mode
+11. brings up the MAP-E interface and reloads fw4
 
-You can download the whole file [here](https://github.com/fakemanhk/openwrt-jp-ipoe/blob/main/map.sh.new) and replace it, _**don't forget to turn on the execute bit**_ of the file after replacement.
+## DUID-LL Handling
 
-After editing, please restart IPv6 interface, or simply reboot router, you'll see that IPv4 PING is working as well as observing more port groups passing traffic now.
+NTT NGN expects DHCPv6 DUID-LL for WAN authentication. Some newer OpenWrt builds may generate a DUID-LLT default, which can prevent WAN6 from receiving IPv6.
 
-Eventually you should see the following screen under **Network > Interfaces**, _WAN6MAPE_ should get the IPv4 exactly the same as using the ISP provided router, there is also a _**Virtual dynamic interface**_ automatically created when MAP-E interface started correctly.
+During setup, the plugin checks:
 
-![](https://user-images.githubusercontent.com/21307353/212857199-21f283c9-e9e2-43b2-8d58-955126076744.png)
+- interface-level `network.<wan6>.clientid`
+- global `network.globals.dhcp_default_duid`
 
-From **Status > Overview** you'll see both **IPv4 Upstream** and **IPv6 Upstream** information:
+If the effective value is already `00030001` plus the WAN device MAC address, it is left unchanged. Otherwise the plugin writes an interface-level `clientid` for WAN6, leaving the global default DUID untouched.
 
-_(Note: If your plan comes with prefix delegation, your IPv6 Upstream might not show you any address, only a prefix will be shown, this is NORMAL)_
+Example for MAC `aa:bb:cc:dd:ee:ff`:
 
-![](https://user-images.githubusercontent.com/21307353/212858791-e21a621e-0a5a-40a9-952f-ec9d759b6a9e.png)
+```text
+00030001aabbccddeeff
+```
 
-Testing with my Linux laptop by visiting the [OCN connectivity verification](https://v6test.ocn.ne.jp/) page, both IPv4/IPv6 addresses should be the same as above upstream informations:
+## Patched MAP Script
 
-![](https://user-images.githubusercontent.com/21307353/212859123-0590650f-29f1-412c-99a7-19d5516a8d22.png)
+The bundled `map.sh` keeps the OpenWrt MAP protocol behavior but fixes Japan MAP-E port handling for fw4/nftables:
 
-## **SUCCESS!!**
+- uses all assigned MAP-E port ranges instead of only the first group
+- preserves ICMP IPv4 connectivity through SNAT
+- supports reserved ports through `Reserved IPv4 Ports`
+- creates and removes dedicated nftables rules per MAP-E interface
 
-Some speed test [results](https://github.com/fakemanhk/openwrt-jp-ipoe/discussions/4)
+OpenWrt 24.10 users may still need this patched script; do not assume the stock script is enough unless you have verified port-range usage and IPv4 ICMP behavior on your own line.
 
-From time to time, you might observe `ip6_tunnel: map-MAPE xmit: Local address not yet configured!` in kernel log, this can be ignored and you don't need to worry about it.
+## Status Page
 
+`Network > JP IPoE > Status` shows:
 
-### Reference materials:
+- WAN6 interface and device
+- WAN6 IPv6 address
+- MAP-E interface state
+- MAP-E IPv4 address
+- BR address
+- assigned port ranges
+- PPPoE fallback metrics
 
-https://datatracker.ietf.org/doc/html/draft-ietf-softwire-map-03#page-6
+The `Auto-Detect BR Address` button runs `mapcalc` and can save the detected BR address into the plugin configuration.
 
-[https://www.labohyt.net/blog/lan/post-6760/](https://www.labohyt.net/blog/lan/post-6760/)
+## CLI
 
-[https://zenn.dev/yakumo/articles/19cbc6309d8143cc9349b2fb0d29771e](https://zenn.dev/yakumo/articles/19cbc6309d8143cc9349b2fb0d29771e)
+The LuCI buttons call the same script you can use over SSH:
 
-[https://blog.hinaloe.net/2020/03/14/openwrt-mape-ocn/](https://blog.hinaloe.net/2020/03/14/openwrt-mape-ocn/)
+```sh
+/usr/sbin/jp-ipoe-setup start
+/usr/sbin/jp-ipoe-setup stop
+/usr/sbin/jp-ipoe-setup status
+/usr/sbin/jp-ipoe-setup detect_br
+```
 
-_First draft: 17 Jan 2023_
+Reinstall the patched MAP protocol script manually if needed:
 
-_Last Edit: 05 June 2024_
+```sh
+/usr/libexec/jp-ipoe-install-map
+```
+
+## Troubleshooting
+
+### WAN6 does not get IPv6
+
+- Confirm the WAN physical device is correct.
+- Confirm the WAN6 interface exists before running setup.
+- Check that WAN6 sends DUID-LL. The plugin sets interface-level `clientid` automatically when needed.
+- Check system logs for DHCPv6 errors:
+
+```sh
+logread -e jp-ipoe
+```
+
+### MAP-E starts but IPv4 does not work
+
+- Confirm `Use Legacy MAP` is enabled.
+- Confirm `BR Address` is correct for your line.
+- Confirm the MAP-E interface is in the WAN firewall zone.
+- Check `Status` for assigned port ranges.
+- If BR detection fails, fill the MAP-E parameters manually from a calculator or from the ISP router's status page.
+
+### `mapcalc` cannot detect a BR address
+
+Detection depends on WAN6 having IPv6 and matching MAP-E rule data. If your IPv6 prefix is unsupported by the common calculator or by `mapcalc`, use provider/router supplied MAP-E parameters manually.
+
+For 10G or prefix-delegated lines, a delegated `/56` or `/60` may be normal. Disable DHCPv6/NDP relay when you have proper prefix delegation and want standard LAN IPv6 server mode.
+
+### RX stays zero on `map-<iface>`
+
+Common causes are an incorrect BR address, missing legacy MAP mode, or incomplete MAP-E parameters. Recalculate or copy the BR and MAP-E parameters from a known-working ISP router if possible.
+
+### Static IPv4 service
+
+The MAP-E IPv4 address may differ from a separately contracted static IPv4 service. This plugin does not emulate provider-specific static IPv4 IPoE behavior.
+
+## References
+
+- RFC 7597: https://datatracker.ietf.org/doc/html/rfc7597
+- Legacy MAP draft used by many NTT-era deployments: https://datatracker.ietf.org/doc/html/draft-ietf-softwire-map-03
+- MAP-E calculator: http://ipv4.web.fc2.com/map-e.html
+- OCN connectivity test: https://v6test.ocn.ne.jp/
+
