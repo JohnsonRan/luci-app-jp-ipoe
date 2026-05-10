@@ -226,7 +226,7 @@ proto_map_teardown() {
 	local cfg="$1"
 	local link="map-$cfg"
 
-	json_get_var type type
+	json_get_vars maptype type
 
 	[ -z "$maptype" ] && maptype="$type"
 	[ -z "$maptype" ] && maptype="map-e"

@@ -165,6 +165,21 @@ jp_ipoe_uci_set_or_delete_option() {
 	fi
 }
 
+mapcalc_lookup() {
+	local rule_data="$1"
+	local suffix="$2"
+	local rule_index
+	local value
+
+	eval "$rule_data"
+	rule_index="${RULE_BMR:-1}"
+	eval "value=\${RULE_${rule_index}_${suffix}}"
+	if [ -z "$value" ] && [ "$rule_index" != "1" ]; then
+		eval "value=\${RULE_1_${suffix}}"
+	fi
+	printf '%s' "$value"
+}
+
 # Wait for WAN6 to get an IPv6 address (with timeout)
 wait_for_ipv6() {
 	local iface="$1"
@@ -304,7 +319,6 @@ ensure_wan6_ip6prefix() {
 setup_wan6() {
 	local device="$1"
 	local iface="$2"
-	local ip6prefix="$3"
 
 	log "Configuring $iface (DHCPv6) on device $device..."
 
@@ -319,9 +333,7 @@ setup_wan6() {
 	uci set network."$iface".reqaddress=try
 	uci set network."$iface".reqprefix=auto
 	uci set network."$iface".ip6assign='64'
-
-	# Set ip6prefix to force /64 (needed when ISP doesn't provide PD)
-	jp_ipoe_uci_set_or_delete_option network "$iface" ip6prefix "$ip6prefix"
+	uci delete network."$iface".ip6prefix 2>/dev/null || true
 
 	uci commit network
 	log "WAN6 interface $iface configured"
@@ -341,7 +353,7 @@ resolve_br_addr() {
 	log "BR address not set, trying to detect via mapcalc..."
 	rule_data=$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)
 	if [ $? -eq 0 ] && [ -n "$rule_data" ]; then
-		br_addr="$(sh "$JP_IPOE_INFO_HELPER" lookup_br "$wan6_iface" "$legacymap" 2>/dev/null)"
+		br_addr="$(mapcalc_lookup "$rule_data" BR)"
 		if [ -n "$br_addr" ]; then
 			log "Detected BR address: $br_addr"
 			printf '%s' "$br_addr"
@@ -618,7 +630,7 @@ apply_network_config() {
 	local ipv6_addr
 
 	ensure_wan_device_ipv6 "$WAN_DEVICE" || return 1
-	setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE" "" || return 1
+	setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE" || return 1
 
 	ifup "$WAN6_IFACE" 2>/dev/null || true
 	sleep 3

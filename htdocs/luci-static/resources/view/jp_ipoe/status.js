@@ -13,6 +13,17 @@ return view.extend({
 	},
 
 	render: function() {
+		var rows = [
+			['s-wan6-iface', _('WAN6 Interface')],
+			['s-wan6-device', _('WAN6 Device')],
+			['s-wan6-ipv6', _('WAN6 IPv6 Address')],
+			['s-mape-iface', _('MAP-E Interface')],
+			['s-mape-state', _('MAP-E Tunnel State')],
+			['s-mape-ipv4', _('MAP-E IPv4 Address')],
+			['s-br-addr', _('Border Relay (BR)')],
+			['s-port-info', _('Assigned Port Ranges')],
+			['s-pppoe-metric', _('PPPoE Fallback Metric')]
+		];
 		var container = E('div', { 'class': 'cbi-map' }, [
 			E('h2', { 'name': 'content' }, _('JP IPoE Status')),
 			E('div', { 'class': 'cbi-map-descr' }, _('Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces.')),
@@ -22,44 +33,13 @@ return view.extend({
 					E('tr', { 'class': 'tr table-titles' }, [
 						E('th', { 'class': 'th' }, _('Item')),
 						E('th', { 'class': 'th' }, _('Value'))
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
-						E('td', { 'class': 'td left' }, _('WAN6 Interface')),
-						E('td', { 'class': 'td left', 'id': 's-wan6-iface' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
-						E('td', { 'class': 'td left' }, _('WAN6 Device')),
-						E('td', { 'class': 'td left', 'id': 's-wan6-device' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
-						E('td', { 'class': 'td left' }, _('WAN6 IPv6 Address')),
-						E('td', { 'class': 'td left', 'id': 's-wan6-ipv6' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
-						E('td', { 'class': 'td left' }, _('MAP-E Interface')),
-						E('td', { 'class': 'td left', 'id': 's-mape-iface' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
-						E('td', { 'class': 'td left' }, _('MAP-E Tunnel State')),
-						E('td', { 'class': 'td left', 'id': 's-mape-state' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
-						E('td', { 'class': 'td left' }, _('MAP-E IPv4 Address')),
-						E('td', { 'class': 'td left', 'id': 's-mape-ipv4' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
-						E('td', { 'class': 'td left' }, _('Border Relay (BR)')),
-						E('td', { 'class': 'td left', 'id': 's-br-addr' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
-						E('td', { 'class': 'td left' }, _('Assigned Port Ranges')),
-						E('td', { 'class': 'td left', 'id': 's-port-info' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
-						E('td', { 'class': 'td left' }, _('PPPoE Fallback Metric')),
-						E('td', { 'class': 'td left', 'id': 's-pppoe-metric' }, '-')
 					])
-				])
+				].concat(rows.map(function(row, index) {
+					return E('tr', { 'class': 'tr cbi-rowstyle-' + (index % 2 + 1) }, [
+						E('td', { 'class': 'td left' }, row[1]),
+						E('td', { 'class': 'td left', 'id': row[0] }, '-')
+					]);
+				})))
 			]),
 
 			E('div', { 'class': 'cbi-page-actions', 'style': 'display:flex; gap:8px;' }, [
@@ -90,19 +70,6 @@ return view.extend({
 			if (res.code === 0 && res.stdout) {
 				try {
 					var data = JSON.parse(res.stdout);
-					
-					var setField = function(id, text, isOk, isBold) {
-						var el = document.getElementById(id);
-						if (el) {
-							el.textContent = text || '-';
-							el.style.color = '';
-							el.style.fontWeight = 'normal';
-							if (isBold === true) el.style.fontWeight = 'bold';
-							if (isOk === true) el.style.color = '#4caf50';
-							if (isOk === false) el.style.color = '#f44336';
-						}
-					};
-
 					[
 						{ id: 's-wan6-iface', text: data.wan6_iface || '-' },
 						{ id: 's-wan6-device', text: data.wan6_device || '-' },
@@ -114,14 +81,24 @@ return view.extend({
 						{ id: 's-port-info', text: data.port_info || '-' },
 						{ id: 's-pppoe-metric', text: data.pppoe_fallback_metrics || _('None') }
 					].forEach(function(field) {
-						setField(field.id, field.text, field.ok, field.bold);
-					});
+						this.setField(field.id, field.text, field.ok, field.bold);
+					}, this);
 				} catch(e) {
 					var msg = document.getElementById('action-msg');
 					if(msg) msg.textContent = _('Failed to parse status');
 				}
 			}
-		});
+		}.bind(this));
+	},
+
+	setField: function(id, text, isOk, isBold) {
+		var el = document.getElementById(id);
+		if (!el)
+			return;
+
+		el.textContent = text || '-';
+		el.style.color = isOk === true ? '#4caf50' : isOk === false ? '#f44336' : '';
+		el.style.fontWeight = isBold === true ? 'bold' : 'normal';
 	},
 
 	detectBR: function() {

@@ -21,6 +21,16 @@ return view.extend({
 
 			return _('Setup script exited with code: ') + res.code;
 		};
+		var runSetupAction = function(args, okMessage) {
+			return fs.exec('/usr/sbin/jp-ipoe-setup', args).then(function(res) {
+				if (res.code === 0)
+					ui.addNotification(null, E('p', okMessage), 'info');
+				else
+					ui.addNotification(null, E('pre', {}, formatCommandOutput(res)), 'error');
+			}).catch(function(e) {
+				ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
+			});
+		};
 
 		m = new form.Map('jp_ipoe', _('JP IPoE Configuration'), _('Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin uses an existing IPv6 WAN (DHCPv6) interface and manages the MAP-E tunnel settings.'));
 
@@ -105,14 +115,7 @@ return view.extend({
 							click: ui.createHandlerFn(this, function() {
 								ui.addNotification(null, E('p', _('Applying IPoE configuration. Please wait ~30 seconds for IPv6 prefix detection.')), 'info');
 								return m.save(null, true).then(function() {
-									return fs.exec('/usr/sbin/jp-ipoe-setup', ['start']);
-								}).then(function(res) {
-									if (res.code === 0)
-										ui.addNotification(null, E('p', _('IPoE configuration applied.')), 'info');
-									else
-										ui.addNotification(null, E('pre', {}, formatCommandOutput(res)), 'error');
-								}).catch(function(e) {
-									ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
+									return runSetupAction(['start'], _('IPoE configuration applied.'));
 								});
 							})
 						}, _('Apply IPoE Configuration')),
@@ -120,14 +123,7 @@ return view.extend({
 						E('button', {
 							class: 'btn cbi-button cbi-button-negative',
 							click: ui.createHandlerFn(this, function() {
-								return fs.exec('/usr/sbin/jp-ipoe-setup', ['stop']).then(function(res) {
-									if (res.code === 0)
-										ui.addNotification(null, E('p', _('IPoE interfaces stopped.')), 'info');
-									else
-										ui.addNotification(null, E('pre', {}, formatCommandOutput(res)), 'error');
-								}).catch(function(e) {
-									ui.addNotification(null, E('p', _('Error executing setup script: ') + e.message), 'error');
-								});
+								return runSetupAction(['stop'], _('IPoE interfaces stopped.'));
 						})
 					}, _('Stop IPoE Interfaces'))
 				])
