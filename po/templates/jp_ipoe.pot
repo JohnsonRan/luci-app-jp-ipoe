@@ -31,10 +31,6 @@ msgstr ""
 msgid "Automatically apply configuration on router startup."
 msgstr ""
 
-#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:124
-msgid "Available"
-msgstr ""
-
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:35
 msgid "BR Address (Border Relay)"
 msgstr ""
@@ -192,7 +188,6 @@ msgstr ""
 msgid "Name for the MAP-E tunnel interface (default: wan6mape)."
 msgstr ""
 
-#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:124
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:125
 msgid "None"
 msgstr ""
@@ -253,10 +248,6 @@ msgstr ""
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:18
 msgid "Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces."
-msgstr ""
-
-#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:59
-msgid "Recoverable State"
 msgstr ""
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:75

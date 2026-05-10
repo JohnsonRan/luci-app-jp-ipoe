@@ -56,10 +56,6 @@ return view.extend({
 						E('td', { 'class': 'td left', 'id': 's-port-info' }, '-')
 					]),
 					E('tr', { 'class': 'tr cbi-rowstyle-1' }, [
-						E('td', { 'class': 'td left' }, _('Recoverable State')),
-						E('td', { 'class': 'td left', 'id': 's-restore-state' }, '-')
-					]),
-					E('tr', { 'class': 'tr cbi-rowstyle-2' }, [
 						E('td', { 'class': 'td left' }, _('PPPoE Fallback Metric')),
 						E('td', { 'class': 'td left', 'id': 's-pppoe-metric' }, '-')
 					])
@@ -116,7 +112,6 @@ return view.extend({
 						{ id: 's-mape-ipv4', text: data.mape_ipv4 || _('Not assigned'), ok: !!data.mape_ipv4 },
 						{ id: 's-br-addr', text: data.br_addr || _('Not set'), ok: !!data.br_addr },
 						{ id: 's-port-info', text: data.port_info || '-' },
-						{ id: 's-restore-state', text: data.has_restore_state ? _('Available') : _('None'), ok: !!data.has_restore_state },
 						{ id: 's-pppoe-metric', text: data.pppoe_fallback_metrics || _('None') }
 					].forEach(function(field) {
 						setField(field.id, field.text, field.ok, field.bold);

@@ -2,7 +2,24 @@
 
 . /lib/functions.sh
 . /usr/share/libubox/jshn.sh
-. /usr/libexec/jp-ipoe-state
+
+PPPOE_SECTION_MATCHES=""
+
+pppoe_section_collect_cb() {
+	local section="$1"
+	local proto
+
+	config_get proto "$section" proto ""
+	[ "$proto" = "pppoe" ] || return 0
+	PPPOE_SECTION_MATCHES="${PPPOE_SECTION_MATCHES}${PPPOE_SECTION_MATCHES:+ }$section"
+}
+
+find_pppoe_sections() {
+	config_load network
+	PPPOE_SECTION_MATCHES=""
+	config_foreach pppoe_section_collect_cb interface
+	printf '%s' "$PPPOE_SECTION_MATCHES"
+}
 
 jp_ipoe_info_mapcalc_lookup() {
 	local rule_data="$1"
@@ -35,11 +52,6 @@ jp_ipoe_info_status() {
 	local pppoe_section
 	local pppoe_metric
 
-	if jp_ipoe_state_load_session_metadata; then
-		[ -n "$JP_IPOE_SESSION_WAN6_IFACE" ] && wan6_iface="$JP_IPOE_SESSION_WAN6_IFACE"
-		[ -n "$JP_IPOE_SESSION_MAPE_IFACE" ] && mape_iface="$JP_IPOE_SESSION_MAPE_IFACE"
-	fi
-
 	wan6_dev="$(uci -q get network."$wan6_iface".device 2>/dev/null)"
 	if [ -n "$wan6_dev" ]; then
 		ipv6_addr="$(ip -6 addr show dev "$wan6_dev" scope global 2>/dev/null | awk '/inet6/ && !/::1/ {print $2; exit}')"
@@ -58,7 +70,7 @@ jp_ipoe_info_status() {
 		port_info="$(grep "PORTSETS" /tmp/map-${mape_iface}.rules | head -1 | sed 's/.*PORTSETS=//;s/RULE_.*//')"
 	fi
 
-	pppoe_sections="$(jp_ipoe_state_load_pppoe_sections 2>/dev/null || true)"
+	pppoe_sections="$(find_pppoe_sections)"
 	for pppoe_section in $pppoe_sections; do
 		pppoe_metric="$(uci -q get network."$pppoe_section".metric 2>/dev/null)"
 		[ -n "$pppoe_metric" ] || pppoe_metric="-"
@@ -74,11 +86,6 @@ jp_ipoe_info_status() {
 	json_add_string "mape_ipv4" "${mape_ip4:-}"
 	json_add_string "br_addr" "${br_addr:-}"
 	json_add_string "port_info" "${port_info:-}"
-	if [ -f "$(jp_ipoe_state_file session)" ]; then
-		json_add_boolean "has_restore_state" 1
-	else
-		json_add_boolean "has_restore_state" 0
-	fi
 	json_add_string "pppoe_fallback_metrics" "${pppoe_fallback_metrics:-}"
 	json_dump
 }

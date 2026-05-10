@@ -41,10 +41,6 @@ msgstr "自动检测 BR 地址"
 msgid "Automatically apply configuration on router startup."
 msgstr "路由器启动时自动应用配置。"
 
-#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:124
-msgid "Available"
-msgstr "可用"
-
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:35
 msgid "BR Address (Border Relay)"
 msgstr "BR 地址（边界中继）"
@@ -204,7 +200,6 @@ msgstr "要使用的已有 DHCPv6 接口名称（默认：wan6）。"
 msgid "Name for the MAP-E tunnel interface (default: wan6mape)."
 msgstr "MAP-E 隧道接口的名称（默认：wan6mape）。"
 
-#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:124
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:125
 msgid "None"
 msgstr "无"
@@ -266,10 +261,6 @@ msgstr "用于 WAN 连接的物理网络设备（例如 eth0）。"
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:18
 msgid "Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces."
 msgstr "OCN バーチャルコネクト（MAP-E）IPoE 接口的实时状态。"
-
-#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:59
-msgid "Recoverable State"
-msgstr "可恢复状态"
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/status.js:75
 msgid "Refresh"
