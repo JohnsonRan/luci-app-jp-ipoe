@@ -542,6 +542,7 @@ validate_map_protocol() {
 	local our_map="/lib/netifd/proto/map.sh"
 	local helper="/usr/libexec/jp-ipoe-map-nft"
 	local info_helper="/usr/libexec/jp-ipoe-info"
+	local installer="/usr/libexec/jp-ipoe-install-map"
 
 	if [ ! -f "$helper" ]; then
 		log_err "Required MAP-E nft helper not found at $helper"
@@ -554,9 +555,15 @@ validate_map_protocol() {
 	fi
 
 	if ! grep -q "JP_IPOE_PATCH_VERSION=" "$our_map" 2>/dev/null; then
-		log_err "Patched MAP-E protocol script is not installed at $our_map"
-		log_err "Please reinstall the package or run /usr/libexec/jp-ipoe-install-map."
-		return 1
+		log "Patched MAP-E protocol script is not installed at $our_map; installing it now."
+		if [ ! -f "$installer" ]; then
+			log_err "MAP-E protocol installer not found at $installer"
+			return 1
+		fi
+		sh "$installer" || {
+			log_err "Failed to install patched MAP-E protocol script."
+			return 1
+		}
 	fi
 
 	log "Patched MAP-E protocol script is installed."

@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-jp-ipoe
 PKG_VERSION:=1.2.0
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 LUCI_TITLE:=LuCI support for JP IPoE (OCN MAP-E)
 LUCI_DEPENDS:=+map
@@ -12,8 +12,11 @@ include $(TOPDIR)/feeds/luci/luci.mk
 
 define Package/$(PKG_NAME)/postinst
 #!/bin/sh
-[ -n "$$IPKG_INSTROOT" ] && exit 0
-/usr/libexec/jp-ipoe-install-map >/dev/null 2>&1 || true
+if [ -n "$$IPKG_INSTROOT" ]; then
+	sh "$$IPKG_INSTROOT/usr/libexec/jp-ipoe-install-map" >/dev/null 2>&1 || true
+else
+	sh /usr/libexec/jp-ipoe-install-map >/dev/null 2>&1 || true
+fi
 exit 0
 endef
 

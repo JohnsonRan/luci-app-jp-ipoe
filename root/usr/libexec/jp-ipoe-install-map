@@ -1,8 +1,9 @@
 #!/bin/sh
 
-TARGET="/lib/netifd/proto/map.sh"
-BACKUP="/lib/netifd/proto/map.sh.orig"
-SOURCE="/usr/share/jp-ipoe/map.sh"
+ROOT="${IPKG_INSTROOT:-}"
+TARGET="$ROOT/lib/netifd/proto/map.sh"
+BACKUP="$ROOT/lib/netifd/proto/map.sh.orig"
+SOURCE="$ROOT/usr/share/jp-ipoe/map.sh"
 
 [ -f "$SOURCE" ] || {
 	echo "ERROR: Patched map.sh not found at $SOURCE" >&2
