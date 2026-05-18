@@ -63,7 +63,9 @@ apply_rules() {
 	{
 		printf 'add table inet %s\n' "$nft_table"
 		printf 'add chain inet %s srcnat { type nat hook postrouting priority 0; policy accept; }\n' "$nft_table"
-		printf 'add rule inet %s srcnat ip protocol icmp oifname "%s" snat ip to %s\n' "$nft_table" "$link" "$snat_ip"
+		printf 'add rule inet %s srcnat ip protocol icmp icmp type echo-request oifname "%s" icmp id { %s } snat ip to %s\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
+		printf 'add rule inet %s srcnat ip protocol icmp icmp type echo-request oifname "%s" icmp id != { %s } snat ip to %s : jhash ip saddr . meta l4proto . icmp id mod %s map { %s }\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
+		printf 'add rule inet %s srcnat ip protocol icmp icmp type != echo-request oifname "%s" snat ip to %s\n' "$nft_table" "$link" "$snat_ip"
 		printf 'add rule inet %s srcnat ip protocol tcp oifname "%s" tcp sport { %s } snat ip to %s : tcp sport\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
 		printf 'add rule inet %s srcnat ip protocol udp oifname "%s" udp sport { %s } snat ip to %s : udp sport\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
 		printf 'add rule inet %s srcnat ip protocol tcp oifname "%s" snat ip to %s : jhash ip saddr . meta l4proto . th sport mod %s map { %s }\n' "$nft_table" "$link" "$snat_ip" "$PORTCOUNT" "$PORTMAP"

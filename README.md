@@ -127,7 +127,7 @@ Example for MAC `aa:bb:cc:dd:ee:ff`:
 The bundled `map.sh` keeps the OpenWrt MAP protocol behavior but fixes Japan MAP-E port handling for fw4/nftables:
 
 - uses all assigned MAP-E port ranges instead of only the first group
-- preserves ICMP IPv4 connectivity through SNAT
+- maps ICMP echo identifiers into the assigned MAP-E port ranges
 - supports reserved ports through `Reserved IPv4 Ports`
 - creates and removes dedicated nftables rules per MAP-E interface
 
