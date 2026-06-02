@@ -178,7 +178,7 @@ proto_map_setup() {
 	    }
 	  fi
 	  if [ "$maptype" = "map-t" ]; then
-		[ -z "$zone" ] && zone=$(fw3 -q network $iface 2>/dev/null)
+		[ -z "$zone" ] && zone=$(fw4 -q network "$iface" 2>/dev/null)
 
 		[ -n "$zone" ] && {
 			json_add_object ""

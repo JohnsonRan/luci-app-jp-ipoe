@@ -15,6 +15,6 @@ jp_ipoe_config_load() {
 	config_get EALEN       config ealen       "42"
 	config_get PSIDLEN     config psidlen     "6"
 	config_get OFFSET      config offset      "4"
-	config_get LEGACYMAP   config legacymap   "1"
-	config_get DHCPV6_RELAY config dhcpv6_relay "1"
+	config_get_bool LEGACYMAP config legacymap "1"
+	config_get_bool DHCPV6_RELAY config dhcpv6_relay "1"
 }

@@ -6,17 +6,24 @@
 # Usage:
 #   jp-ipoe-setup start   - Configure IPoE interfaces
 #   jp-ipoe-setup stop    - Remove IPoE interfaces
+#   jp-ipoe-setup boot    - Run boot-time IPoE startup recovery
 #   jp-ipoe-setup status  - Print current status as JSON
 #   jp-ipoe-setup detect_br - Attempt to detect BR address
 #
 
 . /lib/functions.sh
+. /lib/functions/network.sh
 . /usr/share/jp-ipoe/config.sh
 
 LOG_TAG="jp-ipoe"
 PPPOE_FALLBACK_METRIC="200"
 MAPE_MTU="1460"
 JP_IPOE_INFO_HELPER="/usr/libexec/jp-ipoe-info"
+WAN6_INITIAL_WAIT_TIMEOUT="20"
+WAN6_RECOVERY_WAIT_TIMEOUT="30"
+WAN6_IPV6_POLL_INTERVAL="2"
+IFACE_DOWN_WAIT_TIMEOUT="4"
+IFACE_STATE_POLL_INTERVAL="1"
 
 log() {
 	logger -t "$LOG_TAG" "$@"
@@ -46,16 +53,10 @@ firewall_zone_find_by_network_cb() {
 	local section="$1"
 	local target_network="$2"
 	local networks
-	local net
 
 	[ -n "$FIREWALL_ZONE_MATCH" ] && return 0
 	config_get networks "$section" network ""
-	for net in $networks; do
-		if [ "$net" = "$target_network" ]; then
-			FIREWALL_ZONE_MATCH="$section"
-			return 0
-		fi
-	done
+	list_contains networks "$target_network" && FIREWALL_ZONE_MATCH="$section"
 }
 
 find_firewall_zone() {
@@ -108,7 +109,7 @@ pppoe_section_collect_cb() {
 
 	config_get proto "$section" proto ""
 	[ "$proto" = "pppoe" ] || return 0
-	PPPOE_SECTION_MATCHES="${PPPOE_SECTION_MATCHES}${PPPOE_SECTION_MATCHES:+ }$section"
+	append PPPOE_SECTION_MATCHES "$section"
 }
 
 find_pppoe_sections() {
@@ -116,6 +117,35 @@ find_pppoe_sections() {
 	PPPOE_SECTION_MATCHES=""
 	config_foreach pppoe_section_collect_cb interface
 	printf '%s' "$PPPOE_SECTION_MATCHES"
+}
+
+find_wan_pppoe_sections() {
+	local sections
+	local section
+	local wan_zone
+	local wan_zone_networks
+	local matches=""
+
+	sections="$(find_pppoe_sections)"
+	[ -n "$sections" ] || return 0
+
+	wan_zone="$(find_firewall_zone "wan" "$WAN6_IFACE" "wan")"
+	[ -n "$wan_zone" ] && wan_zone_networks="$(get_firewall_zone_networks "$wan_zone")"
+
+	for section in $sections; do
+		case "$section" in
+			wan|pppoe-wan)
+				append matches "$section"
+				continue
+				;;
+		esac
+
+		[ -n "$wan_zone_networks" ] || continue
+		list_contains wan_zone_networks "$section" || continue
+		append matches "$section"
+	done
+
+	printf '%s' "$matches"
 }
 
 network_device_find_by_name_cb() {
@@ -139,18 +169,6 @@ find_network_device_section() {
 	[ -n "$NETWORK_DEVICE_MATCH" ] || return 1
 
 	printf '%s' "$NETWORK_DEVICE_MATCH"
-}
-
-list_has_item() {
-	local list="$1"
-	local item="$2"
-	local entry
-
-	for entry in $list; do
-		[ "$entry" = "$item" ] && return 0
-	done
-
-	return 1
 }
 
 jp_ipoe_uci_set_or_delete_option() {
@@ -186,41 +204,66 @@ wait_for_ipv6() {
 	local iface="$1"
 	local timeout="${2:-60}"
 	local elapsed=0
+	local ip6
 
 	log "Waiting for IPv6 address on $iface (timeout ${timeout}s)..."
 	while [ $elapsed -lt $timeout ]; do
-		local ip6=$(ip -6 addr show dev "$iface" scope global 2>/dev/null | \
-			awk '/inet6/ && !/::1/ {print $2; exit}')
-		if [ -n "$ip6" ]; then
+		network_flush_cache
+		if network_get_subnet6 ip6 "$iface" && [ -n "$ip6" ]; then
 			log "Got IPv6 address: $ip6"
 			echo "$ip6"
 			return 0
 		fi
-		sleep 2
-		elapsed=$((elapsed + 2))
+		sleep "$WAN6_IPV6_POLL_INTERVAL"
+		elapsed=$((elapsed + WAN6_IPV6_POLL_INTERVAL))
 	done
 	log_err "Timeout waiting for IPv6 address on $iface"
+	return 1
+}
+
+wait_for_interface_down() {
+	local iface="$1"
+	local timeout="${2:-$IFACE_DOWN_WAIT_TIMEOUT}"
+	local elapsed=0
+
+	[ -n "$iface" ] || return 0
+
+	while [ $elapsed -lt $timeout ]; do
+		network_flush_cache
+		network_is_up "$iface" || return 0
+		sleep "$IFACE_STATE_POLL_INTERVAL"
+		elapsed=$((elapsed + IFACE_STATE_POLL_INTERVAL))
+	done
+
+	log "Interface $iface did not report down within ${timeout}s; continuing."
 	return 1
 }
 
 # Get IPv6 prefix from WAN6 interface
 get_ipv6_prefix() {
 	local iface="$1"
+	local device="$2"
 	local p64
 	local ip6
 
 	# Prefer the kernel-installed connected /64 route instead of slicing text out of
 	# a possibly compressed IPv6 address representation.
-	p64=$(ip -6 route show dev "$iface" proto kernel 2>/dev/null | \
-		awk '$1 ~ /\/64$/ && $1 !~ /^fe80:/ { print $1; exit }')
-	if [ -n "$p64" ]; then
-		log "IPv6 /64 prefix from kernel route: $p64"
-		echo "$p64"
-		return 0
+	if [ -n "$device" ]; then
+		p64=$(ip -6 route show dev "$device" proto kernel 2>/dev/null | \
+			awk '$1 ~ /\/64$/ && $1 !~ /^fe80:/ { print $1; exit }')
+		if [ -n "$p64" ]; then
+			log "IPv6 /64 prefix from kernel route: $p64"
+			echo "$p64"
+			return 0
+		fi
 	fi
 
-	ip6=$(ip -6 addr show dev "$iface" scope global 2>/dev/null | \
-		awk '/inet6/ && !/::1/ {print $2; exit}')
+	network_flush_cache
+	network_get_subnet6 ip6 "$iface" || ip6=""
+	if [ -z "$ip6" ] && [ -n "$device" ]; then
+		ip6=$(ip -6 addr show dev "$device" scope global 2>/dev/null | \
+			awk '/inet6/ && !/::1/ {print $2; exit}')
+	fi
 	if [ -z "$ip6" ]; then
 		log_err "No global IPv6 address found on $iface"
 		return 1
@@ -288,7 +331,7 @@ get_device_mac() {
 	[ -n "$device" ] || return 1
 	[ -r "/sys/class/net/$device/address" ] || return 1
 
-	mac="$(cat "/sys/class/net/$device/address" 2>/dev/null)"
+	read -r mac < "/sys/class/net/$device/address" || return 1
 	mac="$(normalize_hex_id "$mac")"
 
 	case "$mac" in
@@ -360,7 +403,7 @@ ensure_wan6_ip6prefix() {
 		return 0
 	fi
 
-	ip6prefix=$(get_ipv6_prefix "$wan6_dev") || return 1
+	ip6prefix=$(get_ipv6_prefix "$wan6_iface" "$wan6_dev") || return 1
 	[ -n "$ip6prefix" ] || return 1
 
 	current_prefix=$(uci -q get network."$wan6_iface".ip6prefix 2>/dev/null)
@@ -372,10 +415,8 @@ ensure_wan6_ip6prefix() {
 	log "Setting $wan6_iface ip6prefix to $ip6prefix for MAP-E startup"
 	uci set network."$wan6_iface".ip6prefix="$ip6prefix"
 	uci commit network
-	ifdown "$wan6_iface" 2>/dev/null || true
-	sleep 2
 	ifup "$wan6_iface" 2>/dev/null || true
-	wait_for_ipv6 "$wan6_dev" 60 >/dev/null || return 1
+	wait_for_ipv6 "$wan6_iface" "$WAN6_RECOVERY_WAIT_TIMEOUT" >/dev/null || return 1
 }
 
 # Configure WAN6 interface via UCI
@@ -385,8 +426,7 @@ setup_wan6() {
 
 	log "Configuring $iface (DHCPv6) on device $device..."
 
-	local exists=$(uci -q get network."$iface" 2>/dev/null)
-	if [ -z "$exists" ]; then
+	if ! uci -q get network."$iface" >/dev/null 2>&1; then
 		log_err "WAN6 interface $iface does not exist. Please create it before starting JP IPoE."
 		return 1
 	fi
@@ -442,8 +482,7 @@ setup_mape() {
 	br_addr="$(resolve_br_addr "$wan6_iface" "$br_addr" "$legacymap")" || return 1
 
 	# Create/update MAP-E interface
-	local exists=$(uci -q get network."$mape_iface" 2>/dev/null)
-	if [ -z "$exists" ]; then
+	if ! uci -q get network."$mape_iface" >/dev/null 2>&1; then
 		uci set network."$mape_iface"=interface
 	fi
 
@@ -477,6 +516,7 @@ setup_firewall() {
 	local wan6_iface="$1"
 	local mape_iface="$2"
 	local wan_zone
+	local networks
 
 	log "Configuring firewall zones..."
 
@@ -488,17 +528,15 @@ setup_firewall() {
 	fi
 
 	# Add wan6 and mape to WAN zone if not already there
+	config_load firewall
+	config_get networks "$wan_zone" network ""
 	for iface in "$wan6_iface" "$mape_iface"; do
-		local already_in_zone=0
-		local net
-		for net in $(uci -q get firewall."$wan_zone".network 2>/dev/null); do
-			[ "$net" = "$iface" ] && already_in_zone=1
-		done
-		if [ "$already_in_zone" = "0" ]; then
-			uci add_list firewall."$wan_zone".network="$iface"
-			log "Added $iface to WAN firewall zone"
-		else
+		if list_contains networks "$iface"; then
 			log "$iface already in WAN firewall zone"
+		else
+			uci add_list firewall."$wan_zone".network="$iface"
+			append networks "$iface"
+			log "Added $iface to WAN firewall zone"
 		fi
 	done
 
@@ -506,30 +544,10 @@ setup_firewall() {
 }
 
 setup_pppoe_fallback_metrics() {
-	local sections
 	local section
-	local wan_zone
-	local wan_zone_networks
 	local sections_to_update
 
-	sections="$(find_pppoe_sections)"
-	[ -n "$sections" ] || return 0
-	wan_zone="$(find_firewall_zone "wan" "$WAN6_IFACE" "wan")"
-	[ -n "$wan_zone" ] && wan_zone_networks="$(get_firewall_zone_networks "$wan_zone")"
-
-	sections_to_update=""
-	for section in $sections; do
-		if [ -n "$wan_zone_networks" ]; then
-			list_has_item "$wan_zone_networks" "$section" || continue
-		else
-			case "$section" in
-				wan|pppoe-wan) ;;
-				*) continue ;;
-			esac
-		fi
-		sections_to_update="${sections_to_update}${sections_to_update:+ }$section"
-	done
-
+	sections_to_update="$(find_wan_pppoe_sections)"
 	[ -n "$sections_to_update" ] || return 0
 
 	for section in $sections_to_update; do
@@ -538,6 +556,55 @@ setup_pppoe_fallback_metrics() {
 	done
 
 	uci commit network
+}
+
+stop_pppoe_fallback_interfaces() {
+	local pppoe_sections="$1"
+	local section
+	local stopped_sections=""
+
+	setup_pppoe_fallback_metrics
+
+	for section in $pppoe_sections; do
+		log "Stopping PPPoE fallback interface $section before WAN6 restart."
+		ifdown "$section" 2>/dev/null || true
+		wait_for_interface_down "$section" || true
+		append stopped_sections "$section"
+	done
+
+	[ -n "$stopped_sections" ] || {
+		log_err "No PPPoE fallback interface stopped."
+		return 1
+	}
+
+	log "Stopped PPPoE fallback interface(s): $stopped_sections"
+	return 0
+}
+
+start_pppoe_fallback_interfaces() {
+	local pppoe_sections="$1"
+	local section
+
+	[ -n "$pppoe_sections" ] || return 0
+
+	for section in $pppoe_sections; do
+		log "Starting PPPoE fallback interface $section after JP IPoE startup."
+		ifup "$section" 2>/dev/null || log_err "Failed to start PPPoE fallback interface $section."
+	done
+}
+
+restart_wan6_interface() {
+	local wan6_iface="$1"
+
+	[ -n "$wan6_iface" ] || {
+		log_err "WAN6 interface name is not configured."
+		return 1
+	}
+
+	log "Restarting $wan6_iface before JP IPoE startup."
+	ifdown "$wan6_iface" 2>/dev/null || true
+	wait_for_interface_down "$wan6_iface" || true
+	ifup "$wan6_iface" 2>/dev/null || true
 }
 
 validate_map_protocol() {
@@ -583,8 +650,7 @@ configure_dhcpv6_relay() {
 	fi
 
 	# Ensure dhcp.wan6 exists
-	local wan6_dhcp=$(uci -q get dhcp."$wan6_iface" 2>/dev/null)
-	if [ -z "$wan6_dhcp" ]; then
+	if ! uci -q get dhcp."$wan6_iface" >/dev/null 2>&1; then
 		uci set dhcp."$wan6_iface"=dhcp
 		uci set dhcp."$wan6_iface".interface="$wan6_iface"
 	fi
@@ -603,8 +669,7 @@ configure_dhcpv6_relay() {
 		uci delete dhcp."$wan6_iface".ndproxy_routing 2>/dev/null
 	fi
 
-	local lan_dhcp=$(uci -q get dhcp.lan 2>/dev/null)
-	if [ -n "$lan_dhcp" ]; then
+	if uci -q get dhcp.lan >/dev/null 2>&1; then
 		if [ "$enabled" = "1" ]; then
 			uci delete dhcp.lan.master 2>/dev/null
 			uci set dhcp.lan.ra="relay"
@@ -620,6 +685,32 @@ configure_dhcpv6_relay() {
 	uci commit dhcp
 	/etc/init.d/odhcpd restart 2>/dev/null || true
 	[ "$enabled" = "1" ] && log "DHCPv6 Relay configured successfully."
+}
+
+recover_wan6_after_pppoe_conflict() {
+	local wan6_iface="$1"
+	local pppoe_sections
+
+	pppoe_sections="$(find_wan_pppoe_sections)"
+	[ -n "$pppoe_sections" ] || {
+		log "WAN6 recovery skipped; no WAN PPPoE fallback interface found."
+		return 1
+	}
+
+	log "WAN6 did not get IPv6. Resetting managed IPoE state before PPPoE fallback stop."
+	teardown_managed_ipoe
+
+	stop_pppoe_fallback_interfaces "$pppoe_sections" || return 1
+
+	log "Restarting $wan6_iface after PPPoE fallback stopped."
+	ifup "$wan6_iface" 2>/dev/null || true
+
+	wait_for_ipv6 "$wan6_iface" "$WAN6_RECOVERY_WAIT_TIMEOUT" >/dev/null || {
+		log_err "WAN6 recovery failed after stopping PPPoE fallback."
+		return 1
+	}
+
+	log "WAN6 recovered after stopping PPPoE fallback."
 }
 
 stop_managed_interfaces() {
@@ -659,10 +750,14 @@ remove_managed_config() {
 	remove_mape_config "$MAPE_IFACE"
 }
 
-rollback_failed_start() {
-	log_err "Start failed, removing managed MAP-E configuration."
+teardown_managed_ipoe() {
 	stop_managed_interfaces
 	remove_managed_config
+}
+
+rollback_failed_start() {
+	log_err "Start failed, removing managed MAP-E configuration."
+	teardown_managed_ipoe
 }
 
 fail_start() {
@@ -699,19 +794,19 @@ apply_map_protocol() {
 
 apply_network_config() {
 	local wan6_dev
-	local ipv6_addr
 
 	ensure_wan_device_ipv6 "$WAN_DEVICE" || return 1
 	setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE" || return 1
 
 	ifup "$WAN6_IFACE" 2>/dev/null || true
-	sleep 3
 
-	wan6_dev=$(uci -q get network."$WAN6_IFACE".device 2>/dev/null)
+	wait_for_ipv6 "$WAN6_IFACE" "$WAN6_INITIAL_WAIT_TIMEOUT" >/dev/null || {
+		recover_wan6_after_pppoe_conflict "$WAN6_IFACE" || return 1
+	}
+
+	network_flush_cache
+	network_get_device wan6_dev "$WAN6_IFACE" || wan6_dev="$(uci -q get network."$WAN6_IFACE".device 2>/dev/null)"
 	[ -z "$wan6_dev" ] && wan6_dev="$WAN_DEVICE"
-
-	ipv6_addr=$(wait_for_ipv6 "$wan6_dev" 60) || return 1
-	[ -n "$ipv6_addr" ] || return 1
 
 	ensure_wan6_ip6prefix "$WAN6_IFACE" "$wan6_dev" || return 1
 	setup_mape "$MAPE_IFACE" "$WAN6_IFACE" "$BR_ADDR" "$LEGACYMAP"
@@ -732,8 +827,6 @@ apply_dhcp_config() {
 
 bringup_mape() {
 	log "Bringing up MAP-E interface..."
-	ifdown "$MAPE_IFACE" 2>/dev/null || true
-	sleep 1
 	ifup "$MAPE_IFACE" 2>/dev/null || true
 
 	log "Reloading firewall..."
@@ -793,19 +886,38 @@ cmd_stop() {
 	jp_ipoe_config_load
 
 	log "Stopping JP IPoE interfaces..."
-	stop_managed_interfaces
-	remove_managed_config
+	teardown_managed_ipoe
 	log "Done."
+}
+
+cmd_boot() {
+	local pppoe_sections
+
+	cmd_stop || return 1
+
+	pppoe_sections="$(find_wan_pppoe_sections)"
+	if [ -n "$pppoe_sections" ]; then
+		stop_pppoe_fallback_interfaces "$pppoe_sections" || return 1
+	else
+		log "No WAN PPPoE fallback interface found before WAN6 restart."
+	fi
+
+	restart_wan6_interface "$WAN6_IFACE" || return 1
+
+	cmd_start || return 1
+
+	start_pppoe_fallback_interfaces "$pppoe_sections"
 }
 
 # Entry point
 case "$1" in
 	start)   cmd_start ;;
 	stop)    cmd_stop ;;
+	boot)    cmd_boot ;;
 	status)  cmd_status ;;
 	detect_br) cmd_detect_br ;;
 	*)
-		echo "Usage: $0 {start|stop|status|detect_br}"
+		echo "Usage: $0 {start|stop|boot|status|detect_br}"
 		exit 1
 		;;
 esac

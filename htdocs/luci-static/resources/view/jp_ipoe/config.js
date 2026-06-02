@@ -3,6 +3,7 @@
 'require form';
 'require fs';
 'require ui';
+'require tools.widgets as widgets';
 
 return view.extend({
 	render: function() {
@@ -40,13 +41,13 @@ return view.extend({
 		o = s.option(form.Flag, 'enabled', _('Enable at Boot'), _('Automatically apply configuration on router startup.'));
 		o.default = o.disabled;
 
-		o = s.option(form.Value, 'wan_device', _('WAN Physical Device'), _('Physical network device used for WAN connection (e.g. eth0).'));
+		o = s.option(widgets.DeviceSelect, 'wan_device', _('WAN Physical Device'), _('Physical network device used for WAN connection (e.g. eth0).'));
 		o.default = 'eth0';
-		o.datatype = 'string';
+		o.noaliases = true;
 
-		o = s.option(form.Value, 'wan6_iface', _('IPv6 WAN Interface Name'), _('Name of the existing DHCPv6 interface to use (default: wan6).'));
+		o = s.option(widgets.NetworkSelect, 'wan6_iface', _('IPv6 WAN Interface Name'), _('Name of the existing DHCPv6 interface to use (default: wan6).'));
 		o.default = 'wan6';
-		o.datatype = 'string';
+		o.nocreate = true;
 
 		o = s.option(form.Value, 'mape_iface', _('MAP-E Interface Name'), _('Name for the MAP-E tunnel interface (default: wan6mape).'));
 		o.default = 'wan6mape';
@@ -104,30 +105,20 @@ return view.extend({
 		o.rmempty = false;
 
 		var s2 = m.section(form.NamedSection, 'config', 'jp_ipoe', _('Actions'), _('Apply or remove IPoE configuration immediately.'));
-		
-		o = s2.option(form.DummyValue, '_apply_buttons');
-		o.modalonly = false;
-		o.render = function(section_id) {
-			return E('div', { class: 'cbi-value' }, [
-				E('div', { class: 'cbi-value-field' }, [
-						E('button', {
-							class: 'btn cbi-button cbi-button-action',
-							click: ui.createHandlerFn(this, function() {
-								ui.addNotification(null, E('p', _('Applying IPoE configuration. Please wait ~30 seconds for IPv6 prefix detection.')), 'info');
-								return m.save(null, true).then(function() {
-									return runSetupAction(['start'], _('IPoE configuration applied.'));
-								});
-							})
-						}, _('Apply IPoE Configuration')),
-					'\u00a0\u00a0',
-						E('button', {
-							class: 'btn cbi-button cbi-button-negative',
-							click: ui.createHandlerFn(this, function() {
-								return runSetupAction(['stop'], _('IPoE interfaces stopped.'));
-						})
-					}, _('Stop IPoE Interfaces'))
-				])
-			]);
+
+		o = s2.option(form.Button, '_apply', _('Apply IPoE Configuration'));
+		o.inputstyle = 'action';
+		o.onclick = function() {
+			ui.addNotification(null, E('p', _('Applying IPoE configuration. Please wait ~30 seconds for IPv6 prefix detection.')), 'info');
+			return m.save(null, true).then(function() {
+				return runSetupAction(['start'], _('IPoE configuration applied.'));
+			});
+		};
+
+		o = s2.option(form.Button, '_stop', _('Stop IPoE Interfaces'));
+		o.inputstyle = 'negative';
+		o.onclick = function() {
+			return runSetupAction(['stop'], _('IPoE interfaces stopped.'));
 		};
 
 		return m.render();

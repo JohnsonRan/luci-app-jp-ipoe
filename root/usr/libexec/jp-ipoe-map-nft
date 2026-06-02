@@ -17,7 +17,7 @@ load_reserved_ports() {
 
 build_portmap() {
 	local portsets="$1"
-	local portset startport endport x skip reserved
+	local portset startport endport x
 
 	PORTCOUNT=0
 	PORTMAP=""
@@ -31,19 +31,14 @@ build_portmap() {
 		[ -n "$endport" ] || endport="$startport"
 
 		for x in $(seq "$startport" "$endport"); do
-			skip=0
-			for reserved in $DONT_SNAT_TO; do
-				[ "$reserved" = "$x" ] && skip=1 && break
-			done
-			[ "$skip" = "1" ] && continue
+			list_contains DONT_SNAT_TO "$x" && continue
 
-			PORTLIST="${PORTLIST}${PORTLIST:+, }${x}"
-			PORTMAP="${PORTMAP}${PORTCOUNT} : ${x}, "
+			append PORTLIST "$x" ", "
+			append PORTMAP "${PORTCOUNT} : ${x}" ", "
 			PORTCOUNT=$((PORTCOUNT + 1))
 		done
 	done
 
-	PORTMAP="${PORTMAP%, }"
 	[ "$PORTCOUNT" -gt 0 ]
 }
 

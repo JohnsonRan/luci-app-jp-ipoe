@@ -91,6 +91,16 @@ Running `Apply IPoE Configuration` executes:
 /usr/sbin/jp-ipoe-setup start
 ```
 
+During router boot, including the first boot after firmware refresh, the init service runs:
+
+1. `/usr/sbin/jp-ipoe-setup stop`
+2. stops WAN PPPoE fallback interfaces such as `pppoe-wan`
+3. restarts the WAN6 interface
+4. runs `/usr/sbin/jp-ipoe-setup start`
+5. starts the stopped PPPoE fallback interfaces only after JP IPoE startup succeeds
+
+Normal service start, service restart, and LuCI apply actions run the regular start/stop path without this boot-only WAN6 recovery sequence.
+
 The setup script:
 
 1. validates that the patched MAP protocol script is installed
@@ -98,12 +108,13 @@ The setup script:
 3. configures the WAN6 interface as DHCPv6
 4. checks the WAN6 DHCPv6 DUID
 5. waits for a global IPv6 address
-6. derives and sets `wan6.ip6prefix` when relay/manual MAP settings need it
-7. creates or updates the MAP-E interface and sets its MTU to `1460`
-8. adds WAN6 and MAP-E to the WAN firewall zone
-9. applies PPPoE fallback metrics if PPPoE interfaces exist
-10. configures DHCPv6/RA/NDP relay or restores standard LAN server mode
-11. brings up the MAP-E interface and reloads fw4
+6. if WAN6 has no IPv6, tears down managed MAP-E state, stops WAN PPPoE fallback interfaces, restarts WAN6, then waits for WAN6 to receive IPv6
+7. derives and sets `wan6.ip6prefix` when relay/manual MAP settings need it
+8. creates or updates the MAP-E interface and sets its MTU to `1460`
+9. adds WAN6 and MAP-E to the WAN firewall zone
+10. applies PPPoE fallback metrics if PPPoE interfaces exist
+11. configures DHCPv6/RA/NDP relay or restores standard LAN server mode
+12. brings up the MAP-E interface and reloads fw4
 
 ## DUID-LL Handling
 
@@ -171,6 +182,7 @@ Reinstall the patched MAP protocol script manually if needed:
 - Confirm the WAN physical device is correct.
 - Confirm the WAN6 interface exists before running setup.
 - Check that WAN6 sends DUID-LL. The plugin sets interface-level `clientid` automatically when needed.
+- If PPPoE fallback is configured, setup stops WAN PPPoE fallback interfaces, restarts WAN6, and waits for WAN6 to receive IPv6.
 - Check system logs for DHCPv6 errors:
 
 ```sh
