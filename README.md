@@ -99,7 +99,7 @@ The setup script:
 4. checks the WAN6 DHCPv6 DUID
 5. waits for a global IPv6 address
 6. derives and sets `wan6.ip6prefix` when relay/manual MAP settings need it
-7. creates or updates the MAP-E interface
+7. creates or updates the MAP-E interface and sets its MTU to `1460`
 8. adds WAN6 and MAP-E to the WAN firewall zone
 9. applies PPPoE fallback metrics if PPPoE interfaces exist
 10. configures DHCPv6/RA/NDP relay or restores standard LAN server mode

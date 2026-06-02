@@ -15,6 +15,7 @@
 
 LOG_TAG="jp-ipoe"
 PPPOE_FALLBACK_METRIC="200"
+MAPE_MTU="1460"
 JP_IPOE_INFO_HELPER="/usr/libexec/jp-ipoe-info"
 
 log() {
@@ -451,6 +452,7 @@ setup_mape() {
 	uci set network."$mape_iface".peeraddr="$br_addr"
 	uci set network."$mape_iface".tunlink="$wan6_iface"
 	uci set network."$mape_iface".encaplimit=ignore
+	uci set network."$mape_iface".mtu="$MAPE_MTU"
 	if [ "$legacymap" = "1" ]; then
 		uci set network."$mape_iface".legacymap=1
 	else
@@ -467,7 +469,7 @@ setup_mape() {
 	jp_ipoe_uci_set_or_delete_option network "$mape_iface" offset "$OFFSET"
 
 	uci commit network
-	log "MAP-E interface $mape_iface configured with BR $br_addr"
+	log "MAP-E interface $mape_iface configured with BR $br_addr and MTU $MAPE_MTU"
 }
 
 # Add interfaces to WAN firewall zone
