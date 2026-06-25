@@ -187,21 +187,6 @@ jp_ipoe_uci_set_or_delete_option() {
 	fi
 }
 
-mapcalc_lookup() {
-	local rule_data="$1"
-	local suffix="$2"
-	local rule_index
-	local value
-
-	eval "$rule_data"
-	rule_index="${RULE_BMR:-1}"
-	eval "value=\${RULE_${rule_index}_${suffix}}"
-	if [ -z "$value" ] && [ "$rule_index" != "1" ]; then
-		eval "value=\${RULE_1_${suffix}}"
-	fi
-	printf '%s' "$value"
-}
-
 # Wait for WAN6 to get an IPv6 address (with timeout)
 wait_for_ipv6() {
 	local iface="$1"
@@ -460,7 +445,7 @@ resolve_br_addr() {
 	log "BR address not set, trying to detect via mapcalc..."
 	rule_data=$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)
 	if [ $? -eq 0 ] && [ -n "$rule_data" ]; then
-		br_addr="$(mapcalc_lookup "$rule_data" BR)"
+		br_addr="$(jp_ipoe_mapcalc_lookup "$rule_data" BR)"
 		if [ -n "$br_addr" ]; then
 			log "Detected BR address: $br_addr"
 			printf '%s' "$br_addr"
@@ -520,6 +505,7 @@ setup_firewall() {
 	local mape_iface="$2"
 	local wan_zone
 	local networks
+	local iface
 
 	log "Configuring firewall zones..."
 
