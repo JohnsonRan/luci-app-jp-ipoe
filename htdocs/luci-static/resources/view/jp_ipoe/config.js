@@ -156,7 +156,7 @@ return view.extend({
 				formNode,
 				E('div', {
 					'id': 'jp-preview-out',
-					'style': 'margin-top:8px; font-family:monospace; white-space:pre-wrap; color:#444;'
+					'style': 'margin-top:8px; font-family:monospace; white-space:pre-wrap; color:inherit; display:none; padding:8px 10px; border:1px solid rgba(128,128,128,0.4); border-radius:4px; background:rgba(128,128,128,0.08);'
 				}, '')
 			]);
 
@@ -212,7 +212,10 @@ return view.extend({
 
 	previewParams: function() {
 		var out = document.getElementById('jp-preview-out');
-		if (out) out.textContent = _('Resolving parameters from WAN6 prefix...');
+		if (out) {
+			out.style.display = '';
+			out.textContent = _('Resolving parameters from WAN6 prefix...');
+		}
 
 		return fs.exec('/usr/sbin/jp-ipoe-setup', ['resolve']).then(function(res) {
 			if (res.code === 0 && res.stdout) {
