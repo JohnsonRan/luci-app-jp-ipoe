@@ -215,15 +215,12 @@ msgstr ""
 msgid "Normally 38 for OCN."
 msgstr ""
 
-#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:93
-msgid "Normally 4 for OCN."
-msgstr ""
-
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:83
-msgid "Normally 42 for OCN."
+msgid "Normally 18 for OCN."
 msgstr ""
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:88
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:93
 msgid "Normally 6 for OCN."
 msgstr ""
 

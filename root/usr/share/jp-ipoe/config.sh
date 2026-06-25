@@ -12,9 +12,9 @@ jp_ipoe_config_load() {
 	config_get IP4PREFIXLEN config ip4prefixlen "20"
 	config_get IP6PREFIX   config ip6prefix   ""
 	config_get IP6PREFIXLEN config ip6prefixlen "38"
-	config_get EALEN       config ealen       "42"
+	config_get EALEN       config ealen       "18"
 	config_get PSIDLEN     config psidlen     "6"
-	config_get OFFSET      config offset      "4"
+	config_get OFFSET      config offset      "6"
 	config_get_bool LEGACYMAP config legacymap "1"
 	config_get_bool DHCPV6_RELAY config dhcpv6_relay "1"
 }
