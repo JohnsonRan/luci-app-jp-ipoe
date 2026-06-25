@@ -38,6 +38,7 @@ log_err() {
 FIREWALL_ZONE_MATCH=""
 PPPOE_SECTION_MATCHES=""
 NETWORK_DEVICE_MATCH=""
+JP_IPOE_STOPPED_PPPOE=""
 
 firewall_zone_find_by_name_cb() {
 	local section="$1"
@@ -570,6 +571,7 @@ stop_pppoe_fallback_interfaces() {
 		ifdown "$section" 2>/dev/null || true
 		wait_for_interface_down "$section" || true
 		append stopped_sections "$section"
+		list_contains JP_IPOE_STOPPED_PPPOE "$section" || append JP_IPOE_STOPPED_PPPOE "$section"
 	done
 
 	[ -n "$stopped_sections" ] || {
@@ -591,6 +593,17 @@ start_pppoe_fallback_interfaces() {
 		log "Starting PPPoE fallback interface $section after JP IPoE startup."
 		ifup "$section" 2>/dev/null || log_err "Failed to start PPPoE fallback interface $section."
 	done
+}
+
+# Restart any PPPoE fallback interface this run stopped (e.g. during WAN6 IPv6
+# recovery) so the line always regains a working IPv4 fallback, regardless of
+# whether IPoE setup ultimately succeeded.
+restore_stopped_pppoe_fallback() {
+	[ -n "$JP_IPOE_STOPPED_PPPOE" ] || return 0
+
+	log "Restoring previously stopped PPPoE fallback interface(s): $JP_IPOE_STOPPED_PPPOE"
+	start_pppoe_fallback_interfaces "$JP_IPOE_STOPPED_PPPOE"
+	JP_IPOE_STOPPED_PPPOE=""
 }
 
 restart_wan6_interface() {
@@ -843,13 +856,7 @@ cmd_detect_br() {
 	sh "$JP_IPOE_INFO_HELPER" detect_br "$WAN6_IFACE" "$LEGACYMAP"
 }
 
-# Main start command
-cmd_start() {
-	jp_ipoe_config_load
-
-	log "Starting JP IPoE setup (OCN MAP-E)..."
-	log "WAN device: $WAN_DEVICE, WAN6: $WAN6_IFACE, MAP-E: $MAPE_IFACE"
-
+run_start_pipeline() {
 	validate_config || {
 		log_err "Configuration validation failed."
 		return 1
@@ -876,9 +883,27 @@ cmd_start() {
 	}
 
 	bringup_mape
+}
 
-	log "JP IPoE setup complete!"
-	return 0
+# Main start command
+cmd_start() {
+	local rc
+
+	jp_ipoe_config_load
+
+	log "Starting JP IPoE setup (OCN MAP-E)..."
+	log "WAN device: $WAN_DEVICE, WAN6: $WAN6_IFACE, MAP-E: $MAPE_IFACE"
+
+	run_start_pipeline
+	rc=$?
+
+	# Always restore PPPoE fallback interfaces stopped during this run, on both
+	# success (they coexist as a lower-priority fallback) and failure (the line
+	# keeps working IPv4 connectivity instead of losing it entirely).
+	restore_stopped_pppoe_fallback
+
+	[ $rc -eq 0 ] && log "JP IPoE setup complete!"
+	return $rc
 }
 
 # Stop / teardown
@@ -893,20 +918,20 @@ cmd_stop() {
 cmd_boot() {
 	local pppoe_sections
 
-	cmd_stop || return 1
+	cmd_stop
 
 	pppoe_sections="$(find_wan_pppoe_sections)"
 	if [ -n "$pppoe_sections" ]; then
-		stop_pppoe_fallback_interfaces "$pppoe_sections" || return 1
+		stop_pppoe_fallback_interfaces "$pppoe_sections" || true
 	else
 		log "No WAN PPPoE fallback interface found before WAN6 restart."
 	fi
 
-	restart_wan6_interface "$WAN6_IFACE" || return 1
+	restart_wan6_interface "$WAN6_IFACE" || true
 
-	cmd_start || return 1
-
-	start_pppoe_fallback_interfaces "$pppoe_sections"
+	# cmd_start restores any PPPoE fallback we stopped above, whether IPoE
+	# startup succeeds or fails, so the line never boots with no connectivity.
+	cmd_start
 }
 
 # Entry point
