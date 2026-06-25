@@ -31,7 +31,7 @@ The system has three layers that must stay in sync: **LuCI UI → orchestration 
 
 ### 1. Configuration model (UCI)
 
-All state lives in one UCI file, `/etc/config/jp_ipoe`, section `config` of type `jp_ipoe`. Defaults seeded by `root/etc/config/jp_ipoe`; full default values (including MAP-E params 20/38/42/6/4 for OCN) are loaded by `jp_ipoe_config_load` in `root/usr/share/jp-ipoe/config.sh`. **Any new config option must be added in three places**: the default config file, `config.sh` (`config_get`), and the LuCI form `htdocs/.../jp_ipoe/config.js`.
+All state lives in one UCI file, `/etc/config/jp_ipoe`, section `config` of type `jp_ipoe`. Defaults seeded by `root/etc/config/jp_ipoe`; full default values (including MAP-E params 20/38/18/6/6 for OCN) are loaded by `jp_ipoe_config_load` in `root/usr/share/jp-ipoe/config.sh`. **Any new config option must be added in three places**: the default config file, `config.sh` (`config_get`), and the LuCI form `htdocs/.../jp_ipoe/config.js`.
 
 ### 2. Orchestration: `jp-ipoe-setup`
 

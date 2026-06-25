@@ -227,15 +227,12 @@ msgstr "OCN 通常是 20"
 msgid "Normally 38 for OCN."
 msgstr "OCN 通常是 38"
 
-#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:93
-msgid "Normally 4 for OCN."
-msgstr "OCN 通常是 4"
-
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:83
-msgid "Normally 42 for OCN."
-msgstr "OCN 通常是 42"
+msgid "Normally 18 for OCN."
+msgstr "OCN 通常是 18"
 
 #: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:88
+#: applications/luci-app-jp-ipoe/htdocs/luci-static/resources/view/jp_ipoe/config.js:93
 msgid "Normally 6 for OCN."
 msgstr "OCN 通常是 6"
 

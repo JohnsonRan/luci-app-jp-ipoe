@@ -80,9 +80,9 @@ return view.extend({
 		o.default = '38';
 		o.optional = true;
 
-		o = s.option(form.Value, 'ealen', _('EA bits length'), _('Normally 42 for OCN.'));
+		o = s.option(form.Value, 'ealen', _('EA bits length'), _('Normally 18 for OCN.'));
 		o.datatype = 'integer';
-		o.default = '42';
+		o.default = '18';
 		o.optional = true;
 
 		o = s.option(form.Value, 'psidlen', _('PSID bits length'), _('Normally 6 for OCN.'));
@@ -90,9 +90,9 @@ return view.extend({
 		o.default = '6';
 		o.optional = true;
 
-		o = s.option(form.Value, 'offset', _('PSID offset'), _('Normally 4 for OCN.'));
+		o = s.option(form.Value, 'offset', _('PSID offset'), _('Normally 6 for OCN.'));
 		o.datatype = 'integer';
-		o.default = '4';
+		o.default = '6';
 		o.optional = true;
 
 		o = s.option(form.Value, 'dont_snat_to', _('Reserved IPv4 Ports'), _('Space-separated IPv4 ports that should never be selected for MAP-E SNAT. Leave empty unless you intentionally reserve fixed inbound service ports.'));
