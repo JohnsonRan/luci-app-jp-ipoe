@@ -137,6 +137,95 @@ jp_ipoe_info_lookup_br() {
 	jp_ipoe_mapcalc_lookup "$rule_data" BR
 }
 
+JP_IPOE_RULES="${JP_IPOE_RULES:-/usr/share/jp-ipoe/ocn-mape-rules}"
+
+# Resolve OCN Virtual Connect MAP-E rule parameters from a WAN6 IPv6
+# prefix alone, replicating the lookup logic of ipv4.web.fc2.com/map-e.html.
+# Prints shell-eval JP_AUTO_* assignments. Returns 1 when the prefix is not
+# covered by any OCN rule table.
+jp_ipoe_resolve_params() {
+	local addr="${1%%/*}"
+	local h0 h1 h2 key38 key31 p31 rec table o1 o2 o3
+	local ip6prefix ip6plen psidlen offset ealen ip4plen ipaddr br
+
+	[ -n "$addr" ] || return 1
+	case "$addr" in
+		*::*) addr="$(printf '%s' "$addr" | sed 's/::/:0:0:0:0:/')" ;;
+	esac
+
+	h0="${addr%%:*}"; addr="${addr#*:}"
+	h1="${addr%%:*}"; addr="${addr#*:}"
+	h2="${addr%%:*}"
+	h0=$((0x${h0:-0})); h1=$((0x${h1:-0})); h2=$((0x${h2:-0}))
+
+	key38=$(printf '%x%06x' "$h0" "$(( h1 * 256 + ((h2 & 0xfc00) >> 8) ))")
+	key31=$(printf '%x%04x' "$h0" "$(( h1 & 0xfffe ))")
+	p31=$(( h0 * 65536 + (h1 & 0xfffe) ))
+
+	if rec=$(grep -m1 "^38 $key38 " "$JP_IPOE_RULES" 2>/dev/null); then
+		table=38
+	elif rec=$(grep -m1 "^31 $key31 " "$JP_IPOE_RULES" 2>/dev/null); then
+		table=31
+	elif rec=$(grep -m1 "^38_20 $key38 " "$JP_IPOE_RULES" 2>/dev/null); then
+		table=38_20
+	else
+		return 1
+	fi
+
+	# shellcheck disable=SC2086
+	set -- $rec
+	o1="$3"; o2="$4"; o3="$5"
+
+	case "$table" in
+		31)
+			ip6prefix=$(printf '%x:%x::' "$h0" "$(( h1 & 0xfffe ))")
+			ip6plen=31; psidlen=8; offset=4; ealen=25; ip4plen=15
+			ipaddr="$o1.$o2.0.0" ;;
+		38)
+			ip6prefix=$(printf '%x:%x:%x::' "$h0" "$h1" "$(( h2 & 0xfc00 ))")
+			ip6plen=38; psidlen=8; offset=4; ealen=18; ip4plen=22
+			ipaddr="$o1.$o2.$o3.0" ;;
+		38_20)
+			ip6prefix=$(printf '%x:%x:%x::' "$h0" "$h1" "$(( h2 & 0xfc00 ))")
+			ip6plen=38; psidlen=6; offset=6; ealen=18; ip4plen=20
+			ipaddr="$o1.$o2.$o3.0" ;;
+	esac
+
+	br=""
+	if [ "$p31" -ge $((0x24047a80)) ] && [ "$p31" -lt $((0x24047a84)) ]; then
+		br=2001:260:700:1::1:275
+	elif [ "$p31" -ge $((0x24047a84)) ] && [ "$p31" -lt $((0x24047a88)) ]; then
+		br=2001:260:700:1::1:276
+	elif { [ "$p31" -ge $((0x240b0010)) ] && [ "$p31" -lt $((0x240b0014)) ]; } || \
+	     { [ "$p31" -ge $((0x240b0250)) ] && [ "$p31" -lt $((0x240b0254)) ]; }; then
+		br=2404:9200:225:100::64
+	elif [ "$table" = "38_20" ]; then
+		br=2001:380:a120::9
+	fi
+
+	printf "JP_AUTO_IPADDR='%s'\n" "$ipaddr"
+	printf "JP_AUTO_IP4PREFIXLEN='%s'\n" "$ip4plen"
+	printf "JP_AUTO_IP6PREFIX='%s'\n" "$ip6prefix"
+	printf "JP_AUTO_IP6PREFIXLEN='%s'\n" "$ip6plen"
+	printf "JP_AUTO_EALEN='%s'\n" "$ealen"
+	printf "JP_AUTO_PSIDLEN='%s'\n" "$psidlen"
+	printf "JP_AUTO_OFFSET='%s'\n" "$offset"
+	printf "JP_AUTO_BR='%s'\n" "$br"
+}
+
+# resolve <wan6_iface>: fetch the interface's global IPv6 and resolve params.
+jp_ipoe_info_resolve() {
+	local wan6_iface="$1"
+	local wan6_ipv6=""
+
+	network_flush_cache
+	network_get_ipaddr6 wan6_ipv6 "$wan6_iface" || wan6_ipv6=""
+	[ -n "$wan6_ipv6" ] || network_get_subnet6 wan6_ipv6 "$wan6_iface" || wan6_ipv6=""
+	[ -n "$wan6_ipv6" ] || return 1
+
+	jp_ipoe_resolve_params "$wan6_ipv6"
+}
+
 case "$1" in
 	status)
 		jp_ipoe_info_status "$2" "$3" "$4"
@@ -146,6 +235,12 @@ case "$1" in
 		;;
 	lookup_br)
 		jp_ipoe_info_lookup_br "$2" "$3"
+		;;
+	resolve)
+		jp_ipoe_info_resolve "$2"
+		;;
+	resolve_addr)
+		jp_ipoe_resolve_params "$2"
 		;;
 	*)
 		exit 1

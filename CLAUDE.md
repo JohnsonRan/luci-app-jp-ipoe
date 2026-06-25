@@ -56,9 +56,15 @@ The patch's purpose: stock OpenWrt only SNATs to the *first* assigned MAP-E port
 
 `root/usr/libexec/jp-ipoe-info` outputs JSON for the LuCI status page (`status`) and runs `mapcalc` for BR-address auto-detection (`detect_br`, `lookup_br`). `jp-ipoe-setup status`/`detect_br` are thin wrappers that load config and forward to this helper. The LuCI status page polls `jp-ipoe-setup status` every 10s.
 
+It also resolves the full MAP-E rule from the WAN6 IPv6 prefix alone (`resolve <wan6_iface>` / `resolve_addr <ipv6>`), replicating the lookup logic of `ipv4.web.fc2.com/map-e.html` offline. The OCN Virtual Connect rule tables (`38`/`31`/`38_20`, ~690 entries ported verbatim from that page) live in `root/usr/share/jp-ipoe/ocn-mape-rules` (`<table> <hexkey> <octets...>`). `resolve` prints shell-eval `JP_AUTO_*` assignments (ipaddr, ip4prefixlen, ip6prefix, ip6prefixlen, ealen, psidlen, offset, BR) and exits non-zero when the prefix is not an OCN line. The per-host IPv4/PSID/ports are still computed by `mapcalc` downstream — `resolve` only supplies the matched rule.
+
+### Auto mode
+
+When `auto=1`, `apply_network_config` calls `apply_auto_params` (after WAN6 IPv6 is up, before `setup_mape`) to override the loaded `IPADDR`/`IP4PREFIXLEN`/`IP6PREFIX`/`IP6PREFIXLEN`/`EALEN`/`PSIDLEN`/`OFFSET`/`BR_ADDR` vars from the `resolve` output, so the rest of the pipeline is unchanged. `auto=1` also forces `wan6_ip6prefix_required` true (the resolved params behave like manual params). The LuCI form hides all manual MAP-E fields when `auto` is enabled.
+
 ### 5. LuCI frontend
 
-Two views under `htdocs/luci-static/resources/view/jp_ipoe/`: `config.js` (form + Apply/Stop buttons that call `fs.exec('/usr/sbin/jp-ipoe-setup', [...])`) and `status.js` (read-only status table + BR auto-detect). Menu entries in `root/usr/share/luci/menu.d/`, ACL granting `exec` on `jp-ipoe-setup` and `uci` access to `jp_ipoe` in `root/usr/share/rpcd/acl.d/`. The LuCI views talk to the backend **only** through `jp-ipoe-setup` — there is no rpcd method; the ACL whitelists the script for `fs.exec`.
+A single view `htdocs/luci-static/resources/view/jp_ipoe/config.js` renders a client-side two-tab page (no reload between tabs): **Configuration** (the `form.Map` + Apply/Stop/Preview buttons) and **Status** (the read-only status table + BR auto-detect, polled every 10s). Tab switching toggles panel `display` and `cbi-tab`/`cbi-tab-disabled` classes — there is one menu node (`admin/network/jp_ipoe` → `jp_ipoe/config`), not a parent with status/config children. The **Preview Parameters** button calls `jp-ipoe-setup resolve` and shows the auto-resolved params inline without applying. ACL grants `exec` on `jp-ipoe-setup` and `uci` access to `jp_ipoe` in `root/usr/share/rpcd/acl.d/`. The view talks to the backend **only** through `jp-ipoe-setup` (`fs.exec`) — there is no rpcd method; the ACL whitelists the script by path, so any subcommand is allowed.
 
 ## Conventions
 
