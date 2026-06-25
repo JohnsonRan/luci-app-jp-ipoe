@@ -29,8 +29,11 @@ stop_service() {
 }
 
 restart() {
+	local enabled
 	stop_service
-	/usr/sbin/jp-ipoe-setup start
+	config_load jp_ipoe
+	config_get_bool enabled config enabled 0
+	[ "$enabled" = "1" ] && /usr/sbin/jp-ipoe-setup start
 }
 
 reload_service() {

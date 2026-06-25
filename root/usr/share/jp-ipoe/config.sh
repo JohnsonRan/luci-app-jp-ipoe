@@ -18,3 +18,21 @@ jp_ipoe_config_load() {
 	config_get_bool LEGACYMAP config legacymap "1"
 	config_get_bool DHCPV6_RELAY config dhcpv6_relay "1"
 }
+
+# Read a value from `mapcalc` rule output, preferring the matched rule
+# (RULE_BMR) and falling back to RULE_1. Shared by jp-ipoe-setup and
+# jp-ipoe-info so the lookup logic stays in one place.
+jp_ipoe_mapcalc_lookup() {
+	local rule_data="$1"
+	local suffix="$2"
+	local rule_index
+	local value
+
+	eval "$rule_data"
+	rule_index="${RULE_BMR:-1}"
+	eval "value=\${RULE_${rule_index}_${suffix}}"
+	if [ -z "$value" ] && [ "$rule_index" != "1" ]; then
+		eval "value=\${RULE_1_${suffix}}"
+	fi
+	printf '%s' "$value"
+}

@@ -102,6 +102,7 @@ return view.extend({
 	},
 
 	detectBR: function() {
+		var self = this;
 		var msg = document.getElementById('action-msg');
 		if(msg) msg.textContent = _('Detecting BR address via mapcalc...');
 
@@ -113,23 +114,17 @@ return view.extend({
 						if(msg) msg.textContent = _('Detection failed') + ': ' + data.error;
 						return;
 					}
-					
+
 					if(msg) msg.textContent = _('BR address detected') + ': ' + data.br_addr;
-					
+
 					var e = document.getElementById('s-br-addr');
 					if (e) {
 						e.textContent = data.br_addr;
 						e.style.color = '#4caf50';
 					}
 
-					if (data.br_addr && confirm(_('Save detected BR address to configuration?\n') + data.br_addr)) {
-						uci.set('jp_ipoe', 'config', 'br_addr', data.br_addr);
-						return uci.save().then(function() {
-							return uci.apply();
-						}).then(function() {
-							if(msg) msg.textContent = _('BR address saved to config.');
-						});
-					}
+					if (data.br_addr)
+						self.promptSaveBR(data.br_addr);
 				} catch (e) {
 					if(msg) msg.textContent = _('Failed to parse detection result');
 				}
@@ -140,7 +135,47 @@ return view.extend({
 			if(msg) msg.textContent = _('Detection error');
 		});
 	},
-	
+
+	promptSaveBR: function(br) {
+		var self = this;
+		ui.showModal(_('Save BR Address'), [
+			E('p', {}, _('Save detected BR address to configuration and re-apply IPoE?')),
+			E('p', {}, E('strong', {}, br)),
+			E('div', { 'class': 'right' }, [
+				E('button', {
+					'class': 'btn cbi-button cbi-button-neutral',
+					'click': ui.hideModal
+				}, _('Cancel')),
+				' ',
+				E('button', {
+					'class': 'btn cbi-button cbi-button-positive',
+					'click': ui.createHandlerFn(self, function() {
+						return self.saveAndApplyBR(br);
+					})
+				}, _('Save & Apply'))
+			])
+		]);
+	},
+
+	saveAndApplyBR: function(br) {
+		var msg = document.getElementById('action-msg');
+		uci.set('jp_ipoe', 'config', 'br_addr', br);
+		return uci.save().then(function() {
+			return uci.apply();
+		}).then(function() {
+			if(msg) msg.textContent = _('BR address saved; re-applying IPoE...');
+			return fs.exec('/usr/sbin/jp-ipoe-setup', ['start']);
+		}).then(function(res) {
+			ui.hideModal();
+			if(msg) msg.textContent = (res && res.code === 0)
+				? _('BR address saved and IPoE re-applied.')
+				: _('BR address saved, but IPoE re-apply failed.');
+		}).catch(function(e) {
+			ui.hideModal();
+			if(msg) msg.textContent = _('Failed to save BR address');
+		});
+	},
+
 	handleSaveApply: null,
 	handleSave: null,
 	handleReset: null

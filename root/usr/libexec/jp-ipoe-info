@@ -3,6 +3,7 @@
 . /lib/functions.sh
 . /lib/functions/network.sh
 . /usr/share/libubox/jshn.sh
+. /usr/share/jp-ipoe/config.sh
 
 PPPOE_SECTION_MATCHES=""
 
@@ -20,21 +21,6 @@ find_pppoe_sections() {
 	PPPOE_SECTION_MATCHES=""
 	config_foreach pppoe_section_collect_cb interface
 	printf '%s' "$PPPOE_SECTION_MATCHES"
-}
-
-jp_ipoe_info_mapcalc_lookup() {
-	local rule_data="$1"
-	local suffix="$2"
-	local rule_index
-	local value
-
-	eval "$rule_data"
-	rule_index="${RULE_BMR:-1}"
-	eval "value=\${RULE_${rule_index}_${suffix}}"
-	if [ -z "$value" ] && [ "$rule_index" != "1" ]; then
-		eval "value=\${RULE_1_${suffix}}"
-	fi
-	printf '%s' "$value"
 }
 
 jp_ipoe_info_status() {
@@ -121,9 +107,9 @@ jp_ipoe_info_detect_br() {
 		return 1
 	fi
 
-	br="$(jp_ipoe_info_mapcalc_lookup "$rule_data" BR)"
-	ipv4="$(jp_ipoe_info_mapcalc_lookup "$rule_data" IPV4ADDR)"
-	portsets="$(jp_ipoe_info_mapcalc_lookup "$rule_data" PORTSETS)"
+	br="$(jp_ipoe_mapcalc_lookup "$rule_data" BR)"
+	ipv4="$(jp_ipoe_mapcalc_lookup "$rule_data" IPV4ADDR)"
+	portsets="$(jp_ipoe_mapcalc_lookup "$rule_data" PORTSETS)"
 
 	if [ -z "$br" ]; then
 		json_init
@@ -148,7 +134,7 @@ jp_ipoe_info_lookup_br() {
 	[ $? -eq 0 ] || return 1
 	[ -n "$rule_data" ] || return 1
 
-	jp_ipoe_info_mapcalc_lookup "$rule_data" BR
+	jp_ipoe_mapcalc_lookup "$rule_data" BR
 }
 
 case "$1" in
