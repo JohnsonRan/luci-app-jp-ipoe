@@ -16,6 +16,8 @@
 . /usr/share/jp-ipoe/config.sh
 
 LOG_TAG="jp-ipoe"
+LOCK_FILE="/var/lock/jp-ipoe.lock"
+LOCK_WAIT_TIMEOUT="60"
 PPPOE_FALLBACK_METRIC="200"
 MAPE_MTU="1460"
 JP_IPOE_INFO_HELPER="/usr/libexec/jp-ipoe-info"
@@ -763,9 +765,23 @@ remove_managed_config() {
 	remove_mape_config "$MAPE_IFACE"
 }
 
+# setup_wan6 / ensure_wan6_ip6prefix fully own network.<wan6>.ip6prefix (it is
+# re-derived on every start), so clear it on teardown to avoid leaving a stale
+# managed prefix behind after a failed start or a stop.
+remove_managed_wan6_state() {
+	[ -n "$WAN6_IFACE" ] || return 0
+
+	if uci -q get network."$WAN6_IFACE".ip6prefix >/dev/null 2>&1; then
+		uci delete network."$WAN6_IFACE".ip6prefix 2>/dev/null || true
+		uci commit network
+		log "Cleared managed ip6prefix on $WAN6_IFACE."
+	fi
+}
+
 teardown_managed_ipoe() {
 	stop_managed_interfaces
 	remove_managed_config
+	remove_managed_wan6_state
 }
 
 rollback_failed_start() {
@@ -799,6 +815,11 @@ validate_config() {
 		log_err "MAP-E interface name is not configured."
 		return 1
 	}
+
+	if [ "$MAPE_IFACE" = "$WAN6_IFACE" ]; then
+		log_err "MAP-E interface name ($MAPE_IFACE) must differ from the WAN6 interface; refusing to overwrite WAN6."
+		return 1
+	fi
 }
 
 apply_map_protocol() {
@@ -934,11 +955,27 @@ cmd_boot() {
 	cmd_start
 }
 
+# Serialize mutating operations so a LuCI apply, an SSH run, and the boot
+# service cannot race each other's uci commits and interface bring-up.
+# Read-only commands (status/detect_br, polled by LuCI) run without the lock.
+run_locked() {
+	command -v flock >/dev/null 2>&1 || { "$@"; return $?; }
+
+	exec 9>"$LOCK_FILE" 2>/dev/null || { "$@"; return $?; }
+
+	if ! flock -w "$LOCK_WAIT_TIMEOUT" 9; then
+		log_err "Another jp-ipoe operation is already in progress; aborting."
+		return 1
+	fi
+
+	"$@"
+}
+
 # Entry point
 case "$1" in
-	start)   cmd_start ;;
-	stop)    cmd_stop ;;
-	boot)    cmd_boot ;;
+	start)   run_locked cmd_start ;;
+	stop)    run_locked cmd_stop ;;
+	boot)    run_locked cmd_boot ;;
 	status)  cmd_status ;;
 	detect_br) cmd_detect_br ;;
 	*)
