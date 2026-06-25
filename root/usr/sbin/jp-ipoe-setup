@@ -373,6 +373,7 @@ ensure_wan6_duid_ll() {
 # MAP-E still needs wan6.ip6prefix when relay mode is enabled or when the
 # tunnel is being driven by manual MAP bounds / BR settings.
 wan6_ip6prefix_required() {
+	[ "$AUTO" = "1" ] && return 0
 	[ "$DHCPV6_RELAY" = "1" ] && return 0
 	[ -n "$IPADDR" ] && return 0
 	[ -n "$IP6PREFIX" ] && return 0
@@ -829,7 +830,39 @@ apply_network_config() {
 	[ -z "$wan6_dev" ] && wan6_dev="$WAN_DEVICE"
 
 	ensure_wan6_ip6prefix "$WAN6_IFACE" "$wan6_dev" || return 1
+
+	if [ "$AUTO" = "1" ]; then
+		apply_auto_params || return 1
+	fi
+
 	setup_mape "$MAPE_IFACE" "$WAN6_IFACE" "$BR_ADDR" "$LEGACYMAP"
+}
+
+# Auto mode: derive all MAP-E parameters from the WAN6 IPv6 prefix via the
+# embedded OCN rule tables (jp-ipoe-info resolve), replacing the manual
+# fc2 map-e calculator step. Overrides the loaded config vars in place so the
+# rest of the pipeline (setup_mape) is unchanged.
+apply_auto_params() {
+	local out
+
+	log "Auto mode: resolving MAP-E parameters from WAN6 IPv6 prefix..."
+	out="$(sh "$JP_IPOE_INFO_HELPER" resolve "$WAN6_IFACE" 2>/dev/null)" || out=""
+	if [ -z "$out" ]; then
+		log_err "Auto mode could not resolve MAP-E parameters. The WAN6 prefix may not be an OCN Virtual Connect line, or WAN6 has no global IPv6 yet."
+		return 1
+	fi
+
+	eval "$out"
+	IPADDR="$JP_AUTO_IPADDR"
+	IP4PREFIXLEN="$JP_AUTO_IP4PREFIXLEN"
+	IP6PREFIX="$JP_AUTO_IP6PREFIX"
+	IP6PREFIXLEN="$JP_AUTO_IP6PREFIXLEN"
+	EALEN="$JP_AUTO_EALEN"
+	PSIDLEN="$JP_AUTO_PSIDLEN"
+	OFFSET="$JP_AUTO_OFFSET"
+	[ -n "$JP_AUTO_BR" ] && BR_ADDR="$JP_AUTO_BR"
+
+	log "Auto mode resolved: ipaddr=$IPADDR/$IP4PREFIXLEN ip6prefix=$IP6PREFIX/$IP6PREFIXLEN psidlen=$PSIDLEN offset=$OFFSET ealen=$EALEN br=$BR_ADDR"
 }
 
 apply_firewall_config() {
@@ -861,6 +894,20 @@ cmd_status() {
 cmd_detect_br() {
 	jp_ipoe_config_load
 	sh "$JP_IPOE_INFO_HELPER" detect_br "$WAN6_IFACE" "$LEGACYMAP"
+}
+
+# Preview the auto-resolved MAP-E parameters for the current WAN6 prefix
+# without applying anything. Prints JP_AUTO_* assignments, or an ERROR: line
+# the LuCI handler can surface. Read-only; safe to run before Apply.
+cmd_resolve() {
+	local out
+	jp_ipoe_config_load
+	out="$(sh "$JP_IPOE_INFO_HELPER" resolve "$WAN6_IFACE" 2>/dev/null)" || out=""
+	if [ -z "$out" ]; then
+		log_err "Could not resolve MAP-E parameters. The WAN6 prefix may not be an OCN Virtual Connect line, or WAN6 has no global IPv6 yet."
+		return 1
+	fi
+	printf '%s\n' "$out"
 }
 
 run_start_pipeline() {
@@ -964,8 +1011,9 @@ case "$1" in
 	boot)    run_locked cmd_boot ;;
 	status)  cmd_status ;;
 	detect_br) cmd_detect_br ;;
+	resolve) cmd_resolve ;;
 	*)
-		echo "Usage: $0 {start|stop|boot|status|detect_br}"
+		echo "Usage: $0 {start|stop|boot|status|detect_br|resolve}"
 		exit 1
 		;;
 esac
