@@ -21,8 +21,9 @@ LOCK_WAIT_TIMEOUT="60"
 PPPOE_FALLBACK_METRIC="200"
 MAPE_MTU="1460"
 JP_IPOE_INFO_HELPER="/usr/libexec/jp-ipoe-info"
-WAN6_INITIAL_WAIT_TIMEOUT="20"
+WAN6_INITIAL_WAIT_TIMEOUT="30"
 WAN6_RECOVERY_WAIT_TIMEOUT="30"
+WAN6_RECOVERY_ATTEMPTS="3"
 WAN6_IPV6_POLL_INTERVAL="2"
 IFACE_DOWN_WAIT_TIMEOUT="4"
 IFACE_STATE_POLL_INTERVAL="1"
@@ -704,15 +705,26 @@ recover_wan6_after_pppoe_conflict() {
 
 	stop_pppoe_fallback_interfaces "$pppoe_sections" || return 1
 
-	log "Restarting $wan6_iface after PPPoE fallback stopped."
-	ifup "$wan6_iface" 2>/dev/null || true
+	# Retry in bounded rounds: each round does a full ifdown/ifup (not a bare
+	# ifup) so DHCPv6 sends a fresh SOLICIT now that PPPoE is no longer
+	# contending the WAN device, then waits one window. A clean re-SOLICIT each
+	# round gives a slow NGN PD more chances than one long passive wait, while
+	# staying bounded so we never thrash the link forever.
+	local attempt=1
+	while [ "$attempt" -le "$WAN6_RECOVERY_ATTEMPTS" ]; do
+		log "WAN6 recovery attempt $attempt/$WAN6_RECOVERY_ATTEMPTS: restarting $wan6_iface after PPPoE fallback stopped."
+		restart_wan6_interface "$wan6_iface" || true
 
-	wait_for_ipv6 "$wan6_iface" "$WAN6_RECOVERY_WAIT_TIMEOUT" >/dev/null || {
-		log_err "WAN6 recovery failed after stopping PPPoE fallback."
-		return 1
-	}
+		if wait_for_ipv6 "$wan6_iface" "$WAN6_RECOVERY_WAIT_TIMEOUT" >/dev/null; then
+			log "WAN6 recovered after stopping PPPoE fallback (attempt $attempt)."
+			return 0
+		fi
 
-	log "WAN6 recovered after stopping PPPoE fallback."
+		attempt=$((attempt + 1))
+	done
+
+	log_err "WAN6 recovery failed after stopping PPPoE fallback ($WAN6_RECOVERY_ATTEMPTS attempts)."
+	return 1
 }
 
 stop_managed_interfaces() {
