@@ -151,6 +151,14 @@ return view.extend({
 			return self.previewParams();
 		};
 
+		o = s2.option(form.Button, '_detect_br', _('Auto-Detect BR Address'));
+		o.inputstyle = 'neutral';
+		o.description = _('Detect the Border Relay address from the live MAP-E rule via mapcalc, then optionally save it and re-apply. Only needed in manual mode; auto mode derives the BR automatically.');
+		o.depends('auto', '0');
+		o.onclick = function() {
+			return self.detectBR();
+		};
+
 		return m.render().then(function(formNode) {
 			var configPanel = E('div', { 'id': 'jp-tab-config' }, [
 				formNode,
@@ -276,14 +284,7 @@ return view.extend({
 					'click': ui.createHandlerFn(this, function() {
 						return this.updateStatus();
 					})
-				}, _('Refresh')),
-				E('button', {
-					'class': 'btn cbi-button cbi-button-neutral',
-					'click': ui.createHandlerFn(this, function() {
-						return this.detectBR();
-					})
-				}, _('Auto-Detect BR Address')),
-				E('span', { 'id': 'action-msg', 'style': 'align-self:center; font-style:italic; color:#888;' })
+				}, _('Refresh'))
 			])
 		];
 	},
@@ -316,8 +317,7 @@ return view.extend({
 						this.setField(field.id, field.text, field.ok, field.bold);
 					}, this);
 				} catch(e) {
-					var msg = document.getElementById('action-msg');
-					if(msg) msg.textContent = _('Failed to parse status');
+					ui.addNotification(null, E('p', _('Failed to parse status')), 'error');
 				}
 			}
 		}.bind(this));
@@ -335,36 +335,29 @@ return view.extend({
 
 	detectBR: function() {
 		var self = this;
-		var msg = document.getElementById('action-msg');
-		if(msg) msg.textContent = _('Detecting BR address via mapcalc...');
+		ui.addNotification(null, E('p', _('Detecting BR address via mapcalc...')), 'info');
 
 		return fs.exec('/usr/sbin/jp-ipoe-setup', ['detect_br']).then(function(res) {
 			if (res.code === 0 && res.stdout) {
 				try {
 					var data = JSON.parse(res.stdout);
 					if (data.error) {
-						if(msg) msg.textContent = _('Detection failed') + ': ' + data.error;
+						ui.addNotification(null, E('p', _('Detection failed') + ': ' + data.error), 'error');
 						return;
-					}
-
-					if(msg) msg.textContent = _('BR address detected') + ': ' + data.br_addr;
-
-					var e = document.getElementById('s-br-addr');
-					if (e) {
-						e.textContent = data.br_addr;
-						e.style.color = '#4caf50';
 					}
 
 					if (data.br_addr)
 						self.promptSaveBR(data.br_addr);
+					else
+						ui.addNotification(null, E('p', _('Detection failed')), 'error');
 				} catch (e) {
-					if(msg) msg.textContent = _('Failed to parse detection result');
+					ui.addNotification(null, E('p', _('Failed to parse detection result')), 'error');
 				}
 			} else {
-				if(msg) msg.textContent = _('Detection failed');
+				ui.addNotification(null, E('p', _('Detection failed')), 'error');
 			}
 		}).catch(function(e) {
-			if(msg) msg.textContent = _('Detection error');
+			ui.addNotification(null, E('p', _('Detection error')), 'error');
 		});
 	},
 
@@ -390,21 +383,20 @@ return view.extend({
 	},
 
 	saveAndApplyBR: function(br) {
-		var msg = document.getElementById('action-msg');
 		uci.set('jp_ipoe', 'config', 'br_addr', br);
 		return uci.save().then(function() {
 			return uci.apply();
 		}).then(function() {
-			if(msg) msg.textContent = _('BR address saved; re-applying IPoE...');
 			return fs.exec('/usr/sbin/jp-ipoe-setup', ['start']);
 		}).then(function(res) {
 			ui.hideModal();
-			if(msg) msg.textContent = (res && res.code === 0)
+			ui.addNotification(null, E('p', (res && res.code === 0)
 				? _('BR address saved and IPoE re-applied.')
-				: _('BR address saved, but IPoE re-apply failed.');
+				: _('BR address saved, but IPoE re-apply failed.')),
+				(res && res.code === 0) ? 'info' : 'warning');
 		}).catch(function(e) {
 			ui.hideModal();
-			if(msg) msg.textContent = _('Failed to save BR address');
+			ui.addNotification(null, E('p', _('Failed to save BR address')), 'error');
 		});
 	},
 

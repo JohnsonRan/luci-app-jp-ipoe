@@ -50,20 +50,12 @@ msgstr ""
 msgid "BR Address (Border Relay)"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:338
-msgid "BR address detected"
-msgstr ""
-
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:391
 msgid "BR address saved and IPoE re-applied."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:392
 msgid "BR address saved, but IPoE re-apply failed."
-msgstr ""
-
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:386
-msgid "BR address saved; re-applying IPoE..."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:250
@@ -86,6 +78,13 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:234
 msgid "Could not resolve parameters."
+msgstr ""
+
+#: htdocs/luci-static/resources/view/jp_ipoe/config.js:155
+msgid ""
+"Detect the Border Relay address from the live MAP-E rule via mapcalc, then "
+"optionally save it and re-apply. Only needed in manual mode; auto mode "
+"derives the BR automatically."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:327

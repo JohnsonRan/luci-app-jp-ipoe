@@ -62,10 +62,6 @@ msgstr "BR"
 msgid "BR Address (Border Relay)"
 msgstr "BR 地址（边界中继）"
 
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:338
-msgid "BR address detected"
-msgstr "已检测到 BR 地址"
-
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:391
 msgid "BR address saved and IPoE re-applied."
 msgstr "BR 地址已保存，IPoE 已重新应用。"
@@ -73,10 +69,6 @@ msgstr "BR 地址已保存，IPoE 已重新应用。"
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:392
 msgid "BR address saved, but IPoE re-apply failed."
 msgstr "BR 地址已保存，但 IPoE 重新应用失败。"
-
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:386
-msgid "BR address saved; re-applying IPoE..."
-msgstr "BR 地址已保存；正在重新应用 IPoE..."
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:250
 msgid "Border Relay (BR)"
@@ -101,6 +93,15 @@ msgstr ""
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:234
 msgid "Could not resolve parameters."
 msgstr "无法解析参数。"
+
+#: htdocs/luci-static/resources/view/jp_ipoe/config.js:155
+msgid ""
+"Detect the Border Relay address from the live MAP-E rule via mapcalc, then "
+"optionally save it and re-apply. Only needed in manual mode; auto mode "
+"derives the BR automatically."
+msgstr ""
+"通过 mapcalc 从实时 MAP-E 规则检测 Border Relay 地址，然后可选择保存并重新应"
+"用。仅手动模式需要；自动模式会自动推导 BR。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:327
 msgid "Detecting BR address via mapcalc..."
