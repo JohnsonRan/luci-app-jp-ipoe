@@ -289,6 +289,15 @@ return view.extend({
 	},
 
 	updateStatus: function() {
+		// Skip the polled status exec when the Status tab is hidden: the poll
+		// stays registered but becomes a cheap DOM check, avoiding a process
+		// spawn + ubus round-trips every 10s while the user sits on Config.
+		// switchTab() calls this directly on entering Status, so display stays
+		// instant.
+		var stat = document.getElementById('jp-tab-status');
+		if (stat && stat.style.display === 'none')
+			return Promise.resolve();
+
 		return fs.exec('/usr/sbin/jp-ipoe-setup', ['status']).then(function(res) {
 			if (res.code === 0 && res.stdout) {
 				try {
