@@ -390,10 +390,11 @@ return view.extend({
 			return fs.exec('/usr/sbin/jp-ipoe-setup', ['start']);
 		}).then(function(res) {
 			ui.hideModal();
-			ui.addNotification(null, E('p', (res && res.code === 0)
+			var ok = res && res.code === 0;
+			ui.addNotification(null, E('p', ok
 				? _('BR address saved and IPoE re-applied.')
 				: _('BR address saved, but IPoE re-apply failed.')),
-				(res && res.code === 0) ? 'info' : 'warning');
+				ok ? 'info' : 'warning');
 		}).catch(function(e) {
 			ui.hideModal();
 			ui.addNotification(null, E('p', _('Failed to save BR address')), 'error');
