@@ -1,5 +1,4 @@
 # luci-app-jp-ipoe
-### This project is fully written by GPT 5.5, Tested by myself. Everything works like how it is.
 ### Thanks to fakemanhk/openwrt-jp-ipoe, What a great tutorial!
 LuCI helper for Japan NTT IPoE MAP-E connections, focused on OCN Virtual Connect style setups.
 
@@ -31,9 +30,25 @@ The package depends on `map`. On install, it also copies the bundled patched MAP
 
 ## Supported Scope
 
-This plugin targets shared IPv4 MAP-E service over NTT IPoE, especially OCN Virtual Connect compatible lines.
+This plugin targets shared IPv4 **MAP-E** service over NTT IPoE. Japan IPoE has three layers: NTT East/West own the fiber and NGN/IPv6 network, a **VNE** (Virtual Network Enabler) operates the actual IPv4-over-IPv6 backend, and retail ISPs resell a VNE under their own brand. What matters for this plugin is the VNE, not the retail brand.
 
-It is not a general static IPv4 IPoE implementation. If your ISP sells a dedicated static IPv4 service, that may use provider-specific behavior that cannot be derived from normal MAP-E parameters.
+Supported VNE backend: **OCN Virtual Connect** (MAP-E). The auto-detect / Preview Parameters feature resolves MAP-E parameters from the WAN6 IPv6 prefix alone for any line on this backend, which includes:
+
+- OCN
+- ぷらら (plala)
+- other ISPs reselling OCN Virtual Connect
+
+Because detection keys off OCN Virtual Connect's NTT-NGN prefix blocks, every reseller on that VNE works the same way regardless of the retail brand name.
+
+Not covered by auto-detect (different VNE, different prefix blocks and BR — none of this data ships with the plugin):
+
+- **v6プラス / IPv6オプション (JPNE)** — MAP-E, but a separate backend
+- **クロスパス (ARTERIA)**, **v6コネクト**, **BIGLOBE** — MAP-E, separate backends
+- **transix (INTERLINK)** — DS-Lite, a different protocol entirely; not supported
+
+Other MAP-E VNEs *may* work if you fill the MAP-E parameters manually (BR, prefixes, EA/PSID/offset) from a calculator or your ISP router. DS-Lite services cannot work with this plugin at all.
+
+It is also not a general static IPv4 IPoE implementation. If your ISP sells a dedicated static IPv4 service, that may use provider-specific behavior that cannot be derived from normal MAP-E parameters.
 
 ## Quick Start
 
