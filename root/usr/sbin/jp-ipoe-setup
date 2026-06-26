@@ -16,7 +16,7 @@
 . /usr/share/jp-ipoe/config.sh
 
 LOG_TAG="jp-ipoe"
-LOCK_FILE="/var/lock/jp-ipoe.lock"
+LOCK_DIR="/var/lock/jp-ipoe.lock.d"
 LOCK_WAIT_TIMEOUT="60"
 PPPOE_FALLBACK_METRIC="200"
 MAPE_MTU="1460"
@@ -991,17 +991,43 @@ cmd_boot() {
 # Serialize mutating operations so a LuCI apply, an SSH run, and the boot
 # service cannot race each other's uci commits and interface bring-up.
 # Read-only commands (status/detect_br, polled by LuCI) run without the lock.
+#
+# Uses an atomic mkdir lock instead of a held file descriptor (flock): a child
+# process can never inherit and pin an fd-based lock open, and a crashed or
+# killed operation must not strand every later run -- including the boot
+# recovery. The recorded holder PID is checked with kill -0, so a dead holder
+# is broken automatically and a live one is named in the abort message.
 run_locked() {
-	command -v flock >/dev/null 2>&1 || { "$@"; return $?; }
+	local rc
+	local holder=""
+	local elapsed=0
 
-	exec 9>"$LOCK_FILE" 2>/dev/null || { "$@"; return $?; }
+	mkdir -p "$(dirname "$LOCK_DIR")" 2>/dev/null || true
 
-	if ! flock -w "$LOCK_WAIT_TIMEOUT" 9; then
-		log_err "Another jp-ipoe operation is already in progress; aborting."
-		return 1
-	fi
+	while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+		holder="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
+		if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+			log "Breaking stale jp-ipoe lock left by dead PID $holder."
+			rm -rf "$LOCK_DIR"
+			continue
+		fi
+		if [ "$elapsed" -ge "$LOCK_WAIT_TIMEOUT" ]; then
+			log_err "Another jp-ipoe operation is already in progress (holder PID ${holder:-unknown}); aborting."
+			return 1
+		fi
+		sleep 1
+		elapsed=$((elapsed + 1))
+	done
+
+	echo "$$" > "$LOCK_DIR/pid" 2>/dev/null
+	trap 'rm -rf "$LOCK_DIR"' EXIT INT TERM HUP
 
 	"$@"
+	rc=$?
+
+	rm -rf "$LOCK_DIR"
+	trap - EXIT INT TERM HUP
+	return "$rc"
 }
 
 # Entry point
