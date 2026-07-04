@@ -28,15 +28,9 @@ stop_service() {
 	/usr/sbin/jp-ipoe-setup stop
 }
 
-restart() {
-	local enabled
-	stop_service
-	config_load jp_ipoe
-	config_get_bool enabled config enabled 0
-	[ "$enabled" = "1" ] && /usr/sbin/jp-ipoe-setup start
-}
-
 reload_service() {
+	# rc.common's default restart is stop + start, which re-runs the
+	# enabled gate in start_service — no separate gate needed here.
 	restart
 }
 

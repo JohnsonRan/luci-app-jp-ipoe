@@ -14,33 +14,59 @@ return view.extend({
 		]);
 	},
 
+	// Lines starting "ERROR:" on stderr are the backend's user-visible failure
+	// contract (see CLAUDE.md); every handler that surfaces command failures
+	// must extract them through here.
+	extractErrorLines: function(text) {
+		return (text || '').split(/\n/).filter(function(line) {
+			return line.indexOf('ERROR:') === 0;
+		});
+	},
+
+	formatCommandOutput: function(res) {
+		var output = (res.stderr || res.stdout || '').trim();
+		var errors = this.extractErrorLines(output);
+
+		if (errors.length)
+			return _('Setup script exited with code:') + ' ' + res.code + '\n' + errors.join('\n');
+
+		if (output)
+			return _('Setup script exited with code:') + ' ' + res.code + '\n' + output.split(/\n/).slice(-8).join('\n');
+
+		return _('Setup script exited with code:') + ' ' + res.code;
+	},
+
+	runSetupAction: function(args, okMessage, failMessage) {
+		var self = this;
+		return fs.exec('/usr/sbin/jp-ipoe-setup', args).then(function(res) {
+			if (res.code === 0)
+				ui.addNotification(null, E('p', okMessage), 'info');
+			else
+				ui.addNotification(null, E('pre', {},
+					(failMessage ? failMessage + '\n' : '') + self.formatCommandOutput(res)), 'error');
+		}).catch(function(e) {
+			ui.addNotification(null, E('p', _('Error executing setup script:') + ' ' + e.message), 'error');
+		});
+	},
+
+	// Single source for the status table: renderStatusPanel builds the rows
+	// from id/label, updateStatus fills them via get(data).
+	statusFields: function() {
+		return [
+			{ id: 's-wan6-iface', label: _('WAN6 Interface'), get: function(d) { return { text: d.wan6_iface || '-' }; } },
+			{ id: 's-wan6-device', label: _('WAN6 Device'), get: function(d) { return { text: d.wan6_device || '-' }; } },
+			{ id: 's-wan6-ipv6', label: _('WAN6 IPv6 Address'), get: function(d) { return { text: d.wan6_ipv6 || _('Not connected'), ok: !!d.wan6_ipv6 }; } },
+			{ id: 's-mape-iface', label: _('MAP-E Interface'), get: function(d) { return { text: d.mape_iface || '-' }; } },
+			{ id: 's-mape-state', label: _('MAP-E Tunnel State'), get: function(d) { return { text: d.mape_state || 'down', ok: d.mape_state === 'up', bold: true }; } },
+			{ id: 's-mape-ipv4', label: _('MAP-E IPv4 Address'), get: function(d) { return { text: d.mape_ipv4 || _('Not assigned'), ok: !!d.mape_ipv4 }; } },
+			{ id: 's-br-addr', label: _('Border Relay (BR)'), get: function(d) { return { text: d.br_addr || _('Not set'), ok: !!d.br_addr }; } },
+			{ id: 's-port-info', label: _('Assigned Port Ranges'), get: function(d) { return { text: d.port_info || '-' }; } },
+			{ id: 's-pppoe-metric', label: _('PPPoE Fallback Metric'), get: function(d) { return { text: d.pppoe_fallback_metrics || _('None') }; } }
+		];
+	},
+
 	render: function() {
 		var self = this;
-
-		var formatCommandOutput = function(res) {
-			var output = (res.stderr || res.stdout || '').trim();
-			var errors = output.split(/\n/).filter(function(line) {
-				return line.indexOf('ERROR:') === 0;
-			});
-
-			if (errors.length)
-				return _('Setup script exited with code:') + ' ' + res.code + '\n' + errors.join('\n');
-
-			if (output)
-				return _('Setup script exited with code:') + ' ' + res.code + '\n' + output.split(/\n/).slice(-8).join('\n');
-
-			return _('Setup script exited with code:') + ' ' + res.code;
-		};
-		var runSetupAction = function(args, okMessage) {
-			return fs.exec('/usr/sbin/jp-ipoe-setup', args).then(function(res) {
-				if (res.code === 0)
-					ui.addNotification(null, E('p', okMessage), 'info');
-				else
-					ui.addNotification(null, E('pre', {}, formatCommandOutput(res)), 'error');
-			}).catch(function(e) {
-				ui.addNotification(null, E('p', _('Error executing setup script:') + ' ' + e.message), 'error');
-			});
-		};
 
 		var m, s, o;
 
@@ -134,14 +160,14 @@ return view.extend({
 		o.onclick = function() {
 			ui.addNotification(null, E('p', _('Applying IPoE configuration. Please wait ~30 seconds for IPv6 prefix detection.')), 'info');
 			return m.save(null, true).then(function() {
-				return runSetupAction(['start'], _('IPoE configuration applied.'));
+				return self.runSetupAction(['start'], _('IPoE configuration applied.'));
 			});
 		};
 
 		o = s2.option(form.Button, '_stop', _('Stop IPoE Interfaces'));
 		o.inputstyle = 'negative';
 		o.onclick = function() {
-			return runSetupAction(['stop'], _('IPoE interfaces stopped.'));
+			return self.runSetupAction(['stop'], _('IPoE interfaces stopped.'));
 		};
 
 		o = s2.option(form.Button, '_preview', _('Preview Parameters'));
@@ -187,8 +213,8 @@ return view.extend({
 				mkTab('status', _('Status'), false)
 			]);
 
+			self.activeTab = 'config';
 			poll.add(L.bind(self.updateStatus, self), 10);
-			requestAnimationFrame(function() { self.updateStatus(); });
 
 			return E('div', { 'class': 'cbi-map' }, [
 				E('h2', {}, _('JP IPoE')),
@@ -206,6 +232,7 @@ return view.extend({
 		if (!cfg || !stat || !menu)
 			return;
 
+		this.activeTab = name;
 		var isConfig = (name === 'config');
 		cfg.style.display = isConfig ? '' : 'none';
 		stat.style.display = isConfig ? 'none' : '';
@@ -219,6 +246,7 @@ return view.extend({
 	},
 
 	previewParams: function() {
+		var self = this;
 		var out = document.getElementById('jp-preview-out');
 		if (out) {
 			out.style.display = '';
@@ -239,9 +267,7 @@ return view.extend({
 						_('IPv6 Prefix') + ': ' + (p.IP6PREFIX || '-') + '/' + (p.IP6PREFIXLEN || '') + '\n' +
 						'EA / PSID / ' + _('offset') + ': ' + (p.EALEN || '') + ' / ' + (p.PSIDLEN || '') + ' / ' + (p.OFFSET || '');
 			} else {
-				var err = (res.stderr || '').split(/\n/).filter(function(x) {
-					return x.indexOf('ERROR:') === 0;
-				}).join(' ');
+				var err = self.extractErrorLines(res.stderr).join(' ');
 				if (out) out.textContent = err || _('Could not resolve parameters.');
 			}
 		}).catch(function(e) {
@@ -250,19 +276,6 @@ return view.extend({
 	},
 
 	renderStatusPanel: function() {
-		var self = this;
-		var rows = [
-			['s-wan6-iface', _('WAN6 Interface')],
-			['s-wan6-device', _('WAN6 Device')],
-			['s-wan6-ipv6', _('WAN6 IPv6 Address')],
-			['s-mape-iface', _('MAP-E Interface')],
-			['s-mape-state', _('MAP-E Tunnel State')],
-			['s-mape-ipv4', _('MAP-E IPv4 Address')],
-			['s-br-addr', _('Border Relay (BR)')],
-			['s-port-info', _('Assigned Port Ranges')],
-			['s-pppoe-metric', _('PPPoE Fallback Metric')]
-		];
-
 		return [
 			E('div', { 'class': 'cbi-map-descr' }, _('Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces.')),
 			E('div', { 'class': 'cbi-section' }, [
@@ -271,10 +284,10 @@ return view.extend({
 						E('th', { 'class': 'th' }, _('Item')),
 						E('th', { 'class': 'th' }, _('Value'))
 					])
-				].concat(rows.map(function(row, index) {
+				].concat(this.statusFields().map(function(field, index) {
 					return E('tr', { 'class': 'tr cbi-rowstyle-' + (index % 2 + 1) }, [
-						E('td', { 'class': 'td left' }, row[1]),
-						E('td', { 'class': 'td left', 'id': row[0] }, '-')
+						E('td', { 'class': 'td left' }, field.label),
+						E('td', { 'class': 'td left', 'id': field.id }, '-')
 					]);
 				})))
 			]),
@@ -290,31 +303,21 @@ return view.extend({
 	},
 
 	updateStatus: function() {
-		// Skip the polled status exec when the Status tab is hidden: the poll
-		// stays registered but becomes a cheap DOM check, avoiding a process
-		// spawn + ubus round-trips every 10s while the user sits on Config.
+		// Skip the polled status exec while the Status tab is inactive: the
+		// poll stays registered but does no work, avoiding a process spawn +
+		// ubus round-trips every 10s while the user sits on Config.
 		// switchTab() calls this directly on entering Status, so display stays
 		// instant.
-		var stat = document.getElementById('jp-tab-status');
-		if (stat && stat.style.display === 'none')
+		if (this.activeTab !== 'status')
 			return Promise.resolve();
 
 		return fs.exec('/usr/sbin/jp-ipoe-setup', ['status']).then(function(res) {
 			if (res.code === 0 && res.stdout) {
 				try {
 					var data = JSON.parse(res.stdout);
-					[
-						{ id: 's-wan6-iface', text: data.wan6_iface || '-' },
-						{ id: 's-wan6-device', text: data.wan6_device || '-' },
-						{ id: 's-wan6-ipv6', text: data.wan6_ipv6 || _('Not connected'), ok: !!data.wan6_ipv6 },
-						{ id: 's-mape-iface', text: data.mape_iface || '-' },
-						{ id: 's-mape-state', text: data.mape_state || 'down', ok: data.mape_state === 'up', bold: true },
-						{ id: 's-mape-ipv4', text: data.mape_ipv4 || _('Not assigned'), ok: !!data.mape_ipv4 },
-						{ id: 's-br-addr', text: data.br_addr || _('Not set'), ok: !!data.br_addr },
-						{ id: 's-port-info', text: data.port_info || '-' },
-						{ id: 's-pppoe-metric', text: data.pppoe_fallback_metrics || _('None') }
-					].forEach(function(field) {
-						this.setField(field.id, field.text, field.ok, field.bold);
+					this.statusFields().forEach(function(field) {
+						var v = field.get(data);
+						this.setField(field.id, v.text, v.ok, v.bold);
 					}, this);
 				} catch(e) {
 					ui.addNotification(null, E('p', _('Failed to parse status')), 'error');
@@ -338,24 +341,21 @@ return view.extend({
 		ui.addNotification(null, E('p', _('Detecting BR address via mapcalc...')), 'info');
 
 		return fs.exec('/usr/sbin/jp-ipoe-setup', ['detect_br']).then(function(res) {
+			var errMsg = _('Detection failed');
+
 			if (res.code === 0 && res.stdout) {
 				try {
 					var data = JSON.parse(res.stdout);
-					if (data.error) {
-						ui.addNotification(null, E('p', _('Detection failed') + ': ' + data.error), 'error');
-						return;
-					}
-
-					if (data.br_addr)
-						self.promptSaveBR(data.br_addr);
-					else
-						ui.addNotification(null, E('p', _('Detection failed')), 'error');
+					if (!data.error && data.br_addr)
+						return self.promptSaveBR(data.br_addr);
+					if (data.error)
+						errMsg += ': ' + data.error;
 				} catch (e) {
-					ui.addNotification(null, E('p', _('Failed to parse detection result')), 'error');
+					errMsg = _('Failed to parse detection result');
 				}
-			} else {
-				ui.addNotification(null, E('p', _('Detection failed')), 'error');
 			}
+
+			ui.addNotification(null, E('p', errMsg), 'error');
 		}).catch(function(e) {
 			ui.addNotification(null, E('p', _('Detection error')), 'error');
 		});
@@ -383,18 +383,15 @@ return view.extend({
 	},
 
 	saveAndApplyBR: function(br) {
+		var self = this;
 		uci.set('jp_ipoe', 'config', 'br_addr', br);
 		return uci.save().then(function() {
 			return uci.apply();
 		}).then(function() {
-			return fs.exec('/usr/sbin/jp-ipoe-setup', ['start']);
-		}).then(function(res) {
 			ui.hideModal();
-			var ok = res && res.code === 0;
-			ui.addNotification(null, E('p', ok
-				? _('BR address saved and IPoE re-applied.')
-				: _('BR address saved, but IPoE re-apply failed.')),
-				ok ? 'info' : 'warning');
+			return self.runSetupAction(['start'],
+				_('BR address saved and IPoE re-applied.'),
+				_('BR address saved, but IPoE re-apply failed.'));
 		}).catch(function(e) {
 			ui.hideModal();
 			ui.addNotification(null, E('p', _('Failed to save BR address')), 'error');

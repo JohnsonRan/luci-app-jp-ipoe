@@ -162,19 +162,22 @@ jp_ipoe_resolve_params() {
 	key31=$(printf '%x%04x' "$h0" "$(( h1 & 0xfffe ))")
 	p31=$(( h0 * 65536 + (h1 & 0xfffe) ))
 
-	if rec=$(grep -m1 "^38 $key38 " "$JP_IPOE_RULES" 2>/dev/null); then
-		table=38
-	elif rec=$(grep -m1 "^31 $key31 " "$JP_IPOE_RULES" 2>/dev/null); then
-		table=31
-	elif rec=$(grep -m1 "^38_20 $key38 " "$JP_IPOE_RULES" 2>/dev/null); then
-		table=38_20
-	else
-		return 1
-	fi
+	# Single pass over the ~690-line rule file, checking all three tables at
+	# once; table priority 38 > 31 > 38_20 matches the fc2 lookup order.
+	rec=$(awk -v k38="$key38" -v k31="$key31" '
+		$1 == "38" && $2 == k38 && !r38 { r38 = $0 }
+		$1 == "31" && $2 == k31 && !r31 { r31 = $0 }
+		$1 == "38_20" && $2 == k38 && !r3820 { r3820 = $0 }
+		END {
+			if (r38) print r38
+			else if (r31) print r31
+			else if (r3820) print r3820
+		}' "$JP_IPOE_RULES" 2>/dev/null)
+	[ -n "$rec" ] || return 1
 
 	# shellcheck disable=SC2086
 	set -- $rec
-	o1="$3"; o2="$4"; o3="$5"
+	table="$1"; o1="$3"; o2="$4"; o3="$5"
 
 	case "$table" in
 		31)

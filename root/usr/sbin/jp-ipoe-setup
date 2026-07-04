@@ -552,7 +552,11 @@ setup_pppoe_fallback_metrics() {
 stop_pppoe_fallback_interfaces() {
 	local pppoe_sections="$1"
 	local section
-	local stopped_sections=""
+
+	[ -n "$pppoe_sections" ] || {
+		log_err "No PPPoE fallback interface stopped."
+		return 1
+	}
 
 	setup_pppoe_fallback_metrics
 
@@ -560,16 +564,10 @@ stop_pppoe_fallback_interfaces() {
 		log "Stopping PPPoE fallback interface $section before WAN6 restart."
 		ifdown "$section" 2>/dev/null || true
 		wait_for_interface_down "$section" || true
-		append stopped_sections "$section"
 		list_contains JP_IPOE_STOPPED_PPPOE "$section" || append JP_IPOE_STOPPED_PPPOE "$section"
 	done
 
-	[ -n "$stopped_sections" ] || {
-		log_err "No PPPoE fallback interface stopped."
-		return 1
-	}
-
-	log "Stopped PPPoE fallback interface(s): $stopped_sections"
+	log "Stopped PPPoE fallback interface(s): $pppoe_sections"
 	return 0
 }
 
@@ -850,6 +848,20 @@ apply_network_config() {
 	setup_mape "$MAPE_IFACE" "$WAN6_IFACE" "$BR_ADDR" "$LEGACYMAP"
 }
 
+# Fetch the auto-resolved MAP-E parameters (JP_AUTO_* shell-eval lines) from
+# the resolve helper for the current WAN6 interface. Shared by auto-mode start
+# and the LuCI preview so the invocation and its failure diagnostic live once.
+fetch_auto_params() {
+	local out
+
+	out="$(sh "$JP_IPOE_INFO_HELPER" resolve "$WAN6_IFACE" 2>/dev/null)" || out=""
+	if [ -z "$out" ]; then
+		log_err "Could not resolve MAP-E parameters. The WAN6 prefix may not be an OCN Virtual Connect line, or WAN6 has no global IPv6 yet."
+		return 1
+	fi
+	printf '%s\n' "$out"
+}
+
 # Auto mode: derive all MAP-E parameters from the WAN6 IPv6 prefix via the
 # embedded OCN rule tables (jp-ipoe-info resolve), replacing the manual
 # fc2 map-e calculator step. Overrides the loaded config vars in place so the
@@ -858,11 +870,7 @@ apply_auto_params() {
 	local out
 
 	log "Auto mode: resolving MAP-E parameters from WAN6 IPv6 prefix..."
-	out="$(sh "$JP_IPOE_INFO_HELPER" resolve "$WAN6_IFACE" 2>/dev/null)" || out=""
-	if [ -z "$out" ]; then
-		log_err "Auto mode could not resolve MAP-E parameters. The WAN6 prefix may not be an OCN Virtual Connect line, or WAN6 has no global IPv6 yet."
-		return 1
-	fi
+	out="$(fetch_auto_params)" || return 1
 
 	eval "$out"
 	IPADDR="$JP_AUTO_IPADDR"
@@ -912,14 +920,8 @@ cmd_detect_br() {
 # without applying anything. Prints JP_AUTO_* assignments, or an ERROR: line
 # the LuCI handler can surface. Read-only; safe to run before Apply.
 cmd_resolve() {
-	local out
 	jp_ipoe_config_load
-	out="$(sh "$JP_IPOE_INFO_HELPER" resolve "$WAN6_IFACE" 2>/dev/null)" || out=""
-	if [ -z "$out" ]; then
-		log_err "Could not resolve MAP-E parameters. The WAN6 prefix may not be an OCN Virtual Connect line, or WAN6 has no global IPv6 yet."
-		return 1
-	fi
-	printf '%s\n' "$out"
+	fetch_auto_params
 }
 
 run_start_pipeline() {
@@ -953,23 +955,13 @@ run_start_pipeline() {
 
 # Main start command
 cmd_start() {
-	local rc
-
 	jp_ipoe_config_load
 
 	log "Starting JP IPoE setup (OCN MAP-E)..."
 	log "WAN device: $WAN_DEVICE, WAN6: $WAN6_IFACE, MAP-E: $MAPE_IFACE"
 
-	run_start_pipeline
-	rc=$?
-
-	# Always restore PPPoE fallback interfaces stopped during this run, on both
-	# success (they coexist as a lower-priority fallback) and failure (the line
-	# keeps working IPv4 connectivity instead of losing it entirely).
-	restore_stopped_pppoe_fallback
-
-	[ $rc -eq 0 ] && log "JP IPoE setup complete!"
-	return $rc
+	run_start_pipeline || return 1
+	log "JP IPoE setup complete!"
 }
 
 # Stop / teardown
@@ -995,8 +987,6 @@ cmd_boot() {
 
 	restart_wan6_interface "$WAN6_IFACE" || true
 
-	# cmd_start restores any PPPoE fallback we stopped above, whether IPoE
-	# startup succeeds or fails, so the line never boots with no connectivity.
 	cmd_start
 }
 
@@ -1037,8 +1027,14 @@ run_locked() {
 	"$@"
 	rc=$?
 
-	rm -rf "$LOCK_DIR"
-	trap - EXIT INT TERM HUP
+	# Always restore PPPoE fallback interfaces stopped during this operation
+	# (WAN6 recovery or boot), on both success (they coexist as a
+	# lower-priority fallback) and failure (the line keeps working IPv4
+	# connectivity instead of losing it entirely). Restoring here, rather than
+	# inside each command, guarantees no locked operation can exit with the
+	# fallback left down. The lock dir is removed by the EXIT trap.
+	restore_stopped_pppoe_fallback
+
 	return "$rc"
 }
 
