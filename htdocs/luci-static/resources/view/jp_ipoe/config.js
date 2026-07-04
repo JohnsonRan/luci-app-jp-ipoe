@@ -70,7 +70,7 @@ return view.extend({
 
 		var m, s, o;
 
-		m = new form.Map('jp_ipoe', null, _('Configure OCN Virtual Connect (MAP-E) IPoE connection. This plugin uses an existing IPv6 WAN (DHCPv6) interface and manages the MAP-E tunnel settings.'));
+		m = new form.Map('jp_ipoe', null, _('Configure OCN Virtual Connect / v6plus (MAP-E) IPoE connection using an existing IPv6 WAN (DHCPv6) interface.'));
 
 		s = m.section(form.NamedSection, 'config', 'jp_ipoe', _('Settings'));
 		s.addremove = false;
@@ -90,15 +90,15 @@ return view.extend({
 		o.default = 'wan6mape';
 		o.datatype = 'string';
 
-		o = s.option(form.Flag, 'legacymap', _('Use Legacy MAP'), _('Enable legacy MAP mode. Required for OCN Virtual Connect.'));
+		o = s.option(form.Flag, 'legacymap', _('Use Legacy MAP'), _('Enable legacy MAP mode. Required for OCN Virtual Connect and v6plus.'));
 		o.default = o.enabled;
 		o.rmempty = false;
 
-		o = s.option(form.Flag, 'auto', _('Auto Parameters'), _('Automatically derive all MAP-E parameters (BR, IPv4/IPv6 prefixes, EA/PSID/offset) from the WAN6 IPv6 prefix, using the built-in OCN rule tables. No need to run the MAP-E calculator. Disable to enter parameters manually.'));
+		o = s.option(form.Flag, 'auto', _('Auto Parameters'), _('Automatically derive all MAP-E parameters from the WAN6 IPv6 prefix using the built-in OCN/v6plus rule tables. Disable to enter parameters manually.'));
 		o.default = o.disabled;
 		o.rmempty = false;
 
-		o = s.option(form.Value, 'br_addr', _('BR Address (Border Relay)'), _('OCN\'s Border Relay IPv6 address (e.g. 2001:f88:...). Use the MAP-E calculator (http://ipv4.web.fc2.com/map-e.html) to obtain this value.'));
+		o = s.option(form.Value, 'br_addr', _('BR Address (Border Relay)'), _('Border Relay IPv6 address, from the MAP-E calculator (http://ipv4.web.fc2.com/map-e.html).'));
 		o.datatype = 'ip6addr';
 		o.optional = true;
 		o.placeholder = '2001:f88:...';
@@ -277,7 +277,7 @@ return view.extend({
 
 	renderStatusPanel: function() {
 		return [
-			E('div', { 'class': 'cbi-map-descr' }, _('Real-time status of OCN Virtual Connect (MAP-E) IPoE interfaces.')),
+			E('div', { 'class': 'cbi-map-descr' }, _('Real-time status of the managed MAP-E IPoE interfaces.')),
 			E('div', { 'class': 'cbi-section' }, [
 				E('table', { 'class': 'table cbi-section-table' }, [
 					E('tr', { 'class': 'tr table-titles' }, [

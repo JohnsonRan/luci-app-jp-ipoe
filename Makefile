@@ -1,10 +1,10 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-jp-ipoe
-PKG_VERSION:=1.3.0
-PKG_RELEASE:=3
+PKG_VERSION:=1.4.0
+PKG_RELEASE:=1
 
-LUCI_TITLE:=LuCI support for JP IPoE (OCN MAP-E)
+LUCI_TITLE:=LuCI support for JP IPoE MAP-E (OCN Virtual Connect / v6plus)
 LUCI_DEPENDS:=+map
 LUCI_PKGARCH:=all
 

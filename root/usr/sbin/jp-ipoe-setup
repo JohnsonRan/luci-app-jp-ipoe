@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# jp-ipoe-setup - OCN Virtual Connect (MAP-E) auto-configuration script
+# jp-ipoe-setup - OCN Virtual Connect / v6plus (MAP-E) auto-configuration script
 # For OpenWrt 22.03+ (fw4/nftables)
 #
 # Usage:
@@ -455,7 +455,7 @@ resolve_br_addr() {
 		fi
 	fi
 
-	log_err "BR address is empty. OCN Virtual Connect requires manual parameters if PD DHCP is disabled."
+	log_err "BR address is empty. Manual parameters are required if PD DHCP is disabled."
 	log_err "Please use the map-e calculator (http://ipv4.web.fc2.com/map-e.html) and fill in the BR Address and other parameters in LuCI."
 	return 1
 }
@@ -856,14 +856,14 @@ fetch_auto_params() {
 
 	out="$(sh "$JP_IPOE_INFO_HELPER" resolve "$WAN6_IFACE" 2>/dev/null)" || out=""
 	if [ -z "$out" ]; then
-		log_err "Could not resolve MAP-E parameters. The WAN6 prefix may not be an OCN Virtual Connect line, or WAN6 has no global IPv6 yet."
+		log_err "Could not resolve MAP-E parameters. The WAN6 prefix may not be an OCN Virtual Connect / v6plus line, or WAN6 has no global IPv6 yet."
 		return 1
 	fi
 	printf '%s\n' "$out"
 }
 
 # Auto mode: derive all MAP-E parameters from the WAN6 IPv6 prefix via the
-# embedded OCN rule tables (jp-ipoe-info resolve), replacing the manual
+# embedded OCN/v6plus rule tables (jp-ipoe-info resolve), replacing the manual
 # fc2 map-e calculator step. Overrides the loaded config vars in place so the
 # rest of the pipeline (setup_mape) is unchanged.
 apply_auto_params() {
@@ -957,7 +957,7 @@ run_start_pipeline() {
 cmd_start() {
 	jp_ipoe_config_load
 
-	log "Starting JP IPoE setup (OCN MAP-E)..."
+	log "Starting JP IPoE setup (MAP-E)..."
 	log "WAN device: $WAN_DEVICE, WAN6: $WAN6_IFACE, MAP-E: $MAPE_IFACE"
 
 	run_start_pipeline || return 1

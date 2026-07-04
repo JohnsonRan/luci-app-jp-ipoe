@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`luci-app-jp-ipoe` is an OpenWrt LuCI package that configures Japan NTT IPoE **MAP-E** (IPv4-over-IPv6) connections, targeting OCN Virtual Connect style lines. It does not build a binary — it installs shell scripts, a patched netifd protocol handler, LuCI views, and UCI config onto an OpenWrt router. There is no test suite; correctness is validated by running on a real OpenWrt device against a live NTT line.
+`luci-app-jp-ipoe` is an OpenWrt LuCI package that configures Japan NTT IPoE **MAP-E** (IPv4-over-IPv6) connections, targeting OCN Virtual Connect and JPNE v6plus lines. It does not build a binary — it installs shell scripts, a patched netifd protocol handler, LuCI views, and UCI config onto an OpenWrt router. There is no test suite; correctness is validated by running on a real OpenWrt device against a live NTT line.
 
 The package layout follows OpenWrt convention: everything under `root/` is copied verbatim to the device filesystem, and `htdocs/` holds the LuCI client-side JS.
 
@@ -56,7 +56,7 @@ The patch's purpose: stock OpenWrt only SNATs to the *first* assigned MAP-E port
 
 `root/usr/libexec/jp-ipoe-info` outputs JSON for the LuCI status page (`status`) and runs `mapcalc` for BR-address auto-detection (`detect_br`, `lookup_br`). `jp-ipoe-setup status`/`detect_br` are thin wrappers that load config and forward to this helper. The LuCI status page polls `jp-ipoe-setup status` every 10s.
 
-It also resolves the full MAP-E rule from the WAN6 IPv6 prefix alone (`resolve <wan6_iface>` / `resolve_addr <ipv6>`), replicating the lookup logic of `ipv4.web.fc2.com/map-e.html` offline. The OCN Virtual Connect rule tables (`38`/`31`/`38_20`, ~690 entries ported verbatim from that page) live in `root/usr/share/jp-ipoe/ocn-mape-rules` (`<table> <hexkey> <octets...>`). `resolve` prints shell-eval `JP_AUTO_*` assignments (ipaddr, ip4prefixlen, ip6prefix, ip6prefixlen, ealen, psidlen, offset, BR) and exits non-zero when the prefix is not an OCN line. The per-host IPv4/PSID/ports are still computed by `mapcalc` downstream — `resolve` only supplies the matched rule.
+It also resolves the full MAP-E rule from the WAN6 IPv6 prefix alone (`resolve <wan6_iface>` / `resolve_addr <ipv6>`), replicating the lookup logic of `ipv4.web.fc2.com/map-e.html` offline. The rule tables (`38`/`31` for JPNE v6plus, `38_20` for OCN Virtual Connect; ~690 entries ported verbatim from that page) live in `root/usr/share/jp-ipoe/mape-rules` (`<table> <hexkey> <octets...>`). `resolve` prints shell-eval `JP_AUTO_*` assignments (ipaddr, ip4prefixlen, ip6prefix, ip6prefixlen, ealen, psidlen, offset, BR) and exits non-zero when the prefix is not on a covered VNE. The per-host IPv4/PSID/ports are still computed by `mapcalc` downstream — `resolve` only supplies the matched rule.
 
 ### Auto mode
 

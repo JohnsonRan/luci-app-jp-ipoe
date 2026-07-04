@@ -137,12 +137,12 @@ jp_ipoe_info_lookup_br() {
 	jp_ipoe_mapcalc_lookup "$rule_data" BR
 }
 
-JP_IPOE_RULES="${JP_IPOE_RULES:-/usr/share/jp-ipoe/ocn-mape-rules}"
+JP_IPOE_RULES="${JP_IPOE_RULES:-/usr/share/jp-ipoe/mape-rules}"
 
-# Resolve OCN Virtual Connect MAP-E rule parameters from a WAN6 IPv6
-# prefix alone, replicating the lookup logic of ipv4.web.fc2.com/map-e.html.
-# Prints shell-eval JP_AUTO_* assignments. Returns 1 when the prefix is not
-# covered by any OCN rule table.
+# Resolve Japan MAP-E (OCN Virtual Connect / JPNE v6plus) rule parameters
+# from a WAN6 IPv6 prefix alone, replicating the lookup logic of
+# ipv4.web.fc2.com/map-e.html. Prints shell-eval JP_AUTO_* assignments.
+# Returns 1 when the prefix is not covered by any rule table.
 jp_ipoe_resolve_params() {
 	local addr="${1%%/*}"
 	local h0 h1 h2 key38 key31 p31 rec table o1 o2 o3

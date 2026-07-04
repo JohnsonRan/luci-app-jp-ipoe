@@ -1,6 +1,6 @@
 {
   "luci-app-jp-ipoe": {
-    "description": "Grant access to JP IPoE (OCN MAP-E) configuration",
+    "description": "Grant access to JP IPoE (MAP-E) configuration",
     "read": {
       "file": {
         "/usr/sbin/jp-ipoe-setup": [ "exec" ]

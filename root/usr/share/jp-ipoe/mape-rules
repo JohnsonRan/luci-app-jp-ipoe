@@ -1,4 +1,4 @@
-# OCN Virtual Connect MAP-E rule tables (from ipv4.web.fc2.com/map-e.html)
+# Japan MAP-E rule tables: OCN Virtual Connect + JPNE v6plus (from ipv4.web.fc2.com/map-e.html)
 # format: <table> <hexkey> <octet1> <octet2> [octet3]
 31 240b0010 106 72
 31 240b0012 14 8
