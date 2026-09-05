@@ -426,13 +426,15 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   const makefile = read('Makefile');
   assert.equal((makefile.match(/^include .*\/luci\.mk$/gm) || []).length, 1);
   assert.doesNotMatch(makefile, /\$\(\s*call\s+BuildPackage[, ]/);
+  assert.match(makefile, /call (Build\/DefaultTargets|BuildPackage|KernelPackage)/,
+    'include/scan.mk must discover the package before make expands luci.mk');
   assert.match(makefile, /^LUCI_DESCRIPTION:=\S.+$/m);
   assert(makefile.indexOf('include $(TOPDIR)/feeds/luci/luci.mk') > makefile.lastIndexOf('\nendef'),
     'define custom package hooks before luci.mk registers the package');
   const postinst = makefile.match(/define Package\/.*\/postinst\n([\s\S]*?)\nendef/)[1].replaceAll('$$', '$');
   const postinstCheck = cp.spawnSync('sh', ['-n'], { input: postinst, encoding: 'utf8' });
   assert.equal(postinstCheck.status, 0, postinstCheck.stderr);
-  console.log('PASS LuCI single registration, description, hook ordering and postinst syntax');
+  console.log('PASS LuCI scan signature, single registration, description, hook ordering and postinst syntax');
 
   const js = read('htdocs/luci-static/resources/view/jp_ipoe/config.js');
   let modal, notifications = 0, executions = 0;

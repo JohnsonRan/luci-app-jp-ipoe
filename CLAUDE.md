@@ -10,7 +10,7 @@ The package layout follows OpenWrt convention: everything under `root/` is copie
 
 ## Build / package
 
-There is no standalone package build — it compiles inside the OpenWrt SDK. Local regression/syntax checks use `node tests/port-forwarding.cjs`. The `Makefile` is an OpenWrt `luci.mk` package definition; `postinst` runs `jp-ipoe-install-map` to install the patched `map.sh` and retains LuCI cache/rpcd refresh on live upgrades. Keep the `luci.mk` include after custom package hooks: it already calls `BuildPackage` for the application and translations, so do not call `BuildPackage` again. `LUCI_DESCRIPTION` supplies menuconfig help text.
+There is no standalone package build — it compiles inside the OpenWrt SDK. Local regression/syntax checks use `node tests/port-forwarding.cjs`. The `Makefile` is an OpenWrt `luci.mk` package definition; `postinst` runs `jp-ipoe-install-map` to install the patched `map.sh` and retains LuCI cache/rpcd refresh on live upgrades. Keep the `luci.mk` include after custom package hooks: it already calls `BuildPackage` for the application and translations, so do not call `BuildPackage` again. Keep the `# call BuildPackage - OpenWrt buildroot signature` comment: `include/scan.mk` discovers packages by literal text before evaluating includes; without it this package disappears from menuconfig. `LUCI_DESCRIPTION` supplies menuconfig help text.
 
 CI (`.github/workflows/build-packages.yml`) builds against the OpenWrt SDK for 24.10 (ipk) and 25.12 (apk), x86/64 and arm64. To reproduce a build locally you need an OpenWrt SDK checkout, then:
 

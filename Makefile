@@ -25,3 +25,5 @@ endef
 
 # luci.mk registers the application and translations once, after our hooks.
 include $(TOPDIR)/feeds/luci/luci.mk
+
+# call BuildPackage - OpenWrt buildroot signature
