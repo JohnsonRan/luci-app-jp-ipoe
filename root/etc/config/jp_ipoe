@@ -7,3 +7,12 @@ config jp_ipoe 'config'
 	option auto '0'
 	option legacymap '1'
 	option dont_snat_to ''
+
+# Managed by the Port Forwarding tab; no forwarding enabled by default.
+# config forward
+#	option iface 'wan6mape'
+#	option public_ip '203.0.113.1'
+#	option external_port '24080'
+#	option internal_ip '192.168.1.10'
+#	option internal_port '8080'
+#	option proto 'tcp'

@@ -32,7 +32,7 @@
 #
 #DONT_SNAT_TO="2938 7088 10233"
 
-JP_IPOE_PATCH_VERSION="2026.04.22"
+JP_IPOE_PATCH_VERSION="2026.09.05"
 JP_IPOE_MAP_HELPER="/usr/libexec/jp-ipoe-map-nft"
 
 
@@ -42,6 +42,8 @@ JP_IPOE_MAP_HELPER="/usr/libexec/jp-ipoe-map-nft"
 	. ../netifd-proto.sh
 	init_proto "$@"
 }
+
+. /usr/share/jp-ipoe/forward.sh
 
 jp_ipoe_run_helper() {
 	[ -f "$JP_IPOE_MAP_HELPER" ] || return 1
@@ -176,6 +178,9 @@ proto_map_setup() {
 		proto_block_restart "$cfg"
 		return
 	    }
+	    # Reservations are installed before checking existing NAT bindings and
+	    # publishing inbound redirects. Unsupported/full-IPv4 maps emit none.
+	    [ "$maptype" = "map-e" ] && jp_forward_emit "$cfg" "$snat_ip" "$portsets"
 	  fi
 	  if [ "$maptype" = "map-t" ]; then
 		[ -z "$zone" ] && zone=$(fw4 -q network "$iface" 2>/dev/null)

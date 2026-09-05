@@ -1,0 +1,410 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+. /usr/share/libubox/jshn.sh
+. /usr/share/jp-ipoe/forward.sh
+
+jp_forward_error() {
+	logger -t jp-ipoe -p daemon.err "$*"
+	echo "ERROR: $*" >&2
+	return 1
+}
+
+jp_forward_runtime() {
+	local rules public proto
+	case "$MAPE_IFACE" in ''|*[!A-Za-z0-9_]*) return 1 ;; esac
+	proto="$(uci -q get network."$MAPE_IFACE".proto)"
+	[ "$proto" = map ] || return 1
+	proto="$(uci -q get network."$MAPE_IFACE".maptype)"
+	[ "$proto" = map-e ] || return 1
+	network_flush_cache
+	network_is_up "$MAPE_IFACE" && network_get_ipaddr JP_PUBLIC "$MAPE_IFACE" || return 1
+	network_get_device JP_LINK "$MAPE_IFACE" && [ "$JP_LINK" = "map-$MAPE_IFACE" ] || return 1
+	jp_forward_ipv4_valid "$JP_PUBLIC" || return 1
+	[ -r "/tmp/map-$MAPE_IFACE.rules" ] || return 1
+	rules="$(sed '1d' "/tmp/map-$MAPE_IFACE.rules")"
+	public="$(jp_ipoe_mapcalc_lookup "$rules" IPV4ADDR)"
+	[ "$public" = "$JP_PUBLIC" ] || return 1
+	JP_RANGES="$(jp_ipoe_mapcalc_lookup "$rules" PORTSETS)"
+	jp_forward_select "$JP_RANGES" "" "" >/dev/null
+}
+
+jp_forward_active() {
+	local data
+	data="$(ubus call "network.interface.$MAPE_IFACE" status 2>/dev/null)" || return 1
+	JP_ACTIVE="$(printf '%s' "$data" | jsonfilter -e '@.data.firewall[*].name' 2>/dev/null | tr '\n' ' ')"
+}
+
+jp_forward_list_cb() {
+	local section="$1" active=0
+	jp_forward_load_rule "$section"
+	if [ "$JP_RUNTIME_OK" = 1 ] && [ "$JP_F_IFACE" = "$MAPE_IFACE" ] && [ "$JP_F_PUBLIC" = "$JP_PUBLIC" ]; then
+		list_contains JP_ACTIVE "jp_ipoe_$section" && active=1
+	fi
+	json_add_object ""
+	json_add_string id "$section"
+	json_add_string family ipv4
+	json_add_string iface "$JP_F_IFACE"
+	json_add_string public_ip "$JP_F_PUBLIC"
+	json_add_string external_port "$JP_F_PORT"
+	json_add_string internal_ip "$JP_F_IP"
+	json_add_string internal_port "$JP_F_DEST"
+	json_add_string proto "$JP_F_PROTO"
+	json_add_boolean active "$active"
+	json_close_object
+}
+
+jp_forward_list() {
+	JP_RUNTIME_OK=0; JP_PUBLIC=""; JP_RANGES=""; JP_ACTIVE=""
+	if jp_forward_runtime; then
+		JP_RUNTIME_OK=1
+		jp_forward_active || JP_ACTIVE=""
+	fi
+	json_init
+	json_add_boolean up "$JP_RUNTIME_OK"
+	json_add_string public_ip "$JP_PUBLIC"
+	json_add_string portsets "$JP_RANGES"
+	json_add_array rules
+	config_load jp_ipoe
+	config_foreach jp_forward_list_cb forward
+	JP6_INSPECT_OK=1
+	JP6_NFT="$(nft list table inet fw4 2>/dev/null)" || JP6_INSPECT_OK=0
+	config_load firewall
+	config_foreach jp_forward6_list_cb rule
+	json_close_array
+	json_dump
+}
+
+jp_forward_clean_config() {
+	local package changes
+	for package in jp_ipoe firewall network; do
+		changes="$(uci changes "$package")" || return 1
+		[ -z "$changes" ] || jp_forward_error "Save/apply pending $package changes before managing port forwards." || return 1
+	done
+}
+
+jp_forward_same_runtime() {
+	local public="$JP_PUBLIC" ranges="$JP_RANGES" link="$JP_LINK"
+	( jp_forward_runtime && [ "$JP_PUBLIC" = "$public" ] &&
+		[ "$JP_RANGES" = "$ranges" ] && [ "$JP_LINK" = "$link" ] )
+}
+
+jp_forward_refresh_snat() {
+	jp_forward_same_runtime || return 1
+	sh /usr/libexec/jp-ipoe-map-nft setup "$MAPE_IFACE" "$JP_LINK" "$JP_PUBLIC" "$JP_RANGES"
+}
+
+jp_forward_render() {
+	json_init
+	json_add_array firewall
+	jp_forward_emit "$MAPE_IFACE" "$JP_PUBLIC" "$JP_RANGES" "$1"
+	json_close_array
+	json_dump
+}
+
+jp_forward_contains() {
+	[ "$(printf '%s' "$1" | jsonfilter -e '@.firewall[0].name' 2>/dev/null)" = "jp_ipoe_$2" ]
+}
+
+jp_forward_publish() {
+	local section="$1" replacement="$2" current payload
+	jp_forward_same_runtime || return 1
+	current="$(ubus call "network.interface.$MAPE_IFACE" status)" || return 1
+	# ucode is already provided by fw4. Change only this rule; preserve other
+	# firewall entries and all other netifd data (set_data merges named fields).
+	payload="$(ucode -e '
+		let state = json(ARGV[0]), update = json(ARGV[1]), name = ARGV[2];
+		let rules = state.data?.firewall ?? [];
+		if (!state.up || type(rules) != "array" || type(update.firewall) != "array") exit(1);
+		print({ firewall: [
+			...filter(rules, r => r.name != name),
+			...filter(update.firewall, r => r.name == name)
+		] });
+	' "$current" "$replacement" "jp_ipoe_$section")" || return 1
+	jp_forward_same_runtime || return 1
+	ubus call "network.interface.$MAPE_IFACE" set_data "$payload" >/dev/null || return 1
+	fw4 reload >&2
+}
+
+jp_forward_withdraw() {
+	jp_forward_publish "$1" '{"firewall":[]}' && jp_forward_active &&
+		! list_contains JP_ACTIVE "jp_ipoe_$1"
+}
+
+jp_forward_add() {
+	local proto="$1" address="$2" dest="$3" requested="$4"
+	local port section src_zone dest_zone reserved replacement
+	[ "$#" -ge 3 ] && [ "$#" -le 4 ] || return 1
+	case "$proto" in tcp|udp|tcpudp) ;; *) jp_forward_error "Protocol must be tcp, udp or tcpudp."; return 1 ;; esac
+	jp_forward_port_valid "$dest" || { jp_forward_error "Invalid internal port (1-65535)."; return 1; }
+	[ -z "$requested" ] || jp_forward_port_valid "$requested" || { jp_forward_error "Invalid external port (1-65535)."; return 1; }
+	jp_forward_clean_config || return 1
+	jp_forward_runtime || { jp_forward_error "MAP-E must be up with a valid assigned port set."; return 1; }
+	jp_forward_lan_valid "$address" || { jp_forward_error "Destination must be a host in the current lan IPv4 subnet, not the router or broadcast address."; return 1; }
+	src_zone="$(jp_forward_zone "$MAPE_IFACE")" && dest_zone="$(jp_forward_zone lan)" && [ "$src_zone" != "$dest_zone" ] || {
+		jp_forward_error "MAP-E and lan must belong to distinct, unambiguous firewall zones."
+		return 1
+	}
+	jp_forward_busy "$JP_PUBLIC" || {
+		jp_forward_error "Cannot inspect local bindings/NAT. Ensure conntrack is installed and miniupnpd is stopped."
+		return 1
+	}
+	jp_forward_blocked "$MAPE_IFACE" "$proto" ""
+	config_get reserved config dont_snat_to ""
+	port="$(jp_forward_select "$JP_RANGES" "$JP_FORWARD_BLOCKED $reserved" "$requested")" || {
+		jp_forward_error "No available assigned port: outside allocation, reserved, locally occupied, or conflicting firewall rule."
+		return 1
+	}
+	jp_forward_reserved "$MAPE_IFACE" "$JP_PUBLIC"
+	jp_forward_select "$JP_RANGES" "$JP_FORWARD_RESERVED $port" "" >/dev/null || {
+		jp_forward_error "At least one assigned port must remain for outbound NAT."
+		return 1
+	}
+
+	section="$(uci add jp_ipoe forward)" || return 1
+	if ! { uci set "jp_ipoe.$section.iface=$MAPE_IFACE" &&
+		uci set "jp_ipoe.$section.public_ip=$JP_PUBLIC" &&
+		uci set "jp_ipoe.$section.external_port=$port" &&
+		uci set "jp_ipoe.$section.internal_ip=$address" &&
+		uci set "jp_ipoe.$section.internal_port=$dest" &&
+		uci set "jp_ipoe.$section.proto=$proto" && uci commit jp_ipoe; }; then
+		uci -q delete "jp_ipoe.$section"
+		uci commit jp_ipoe
+		jp_forward_error "Failed to save forwarding rule."
+		return 1
+	fi
+
+	# Reserve atomically on the live link, then recheck for a raced binding.
+	# Existing conntrack mappings survive; neither tunnel nor network restarts.
+	if jp_forward_refresh_snat >&2 && replacement="$(jp_forward_render "$section")" &&
+		jp_forward_contains "$replacement" "$section" &&
+		jp_forward_publish "$section" "$replacement" &&
+		jp_forward_active && list_contains JP_ACTIVE "jp_ipoe_$section"; then
+		json_init
+		json_add_string external_port "$port"
+		json_add_string public_ip "$JP_PUBLIC"
+		json_dump
+		return 0
+	fi
+
+	# Never release a reservation while DNAT might still be active. If rollback
+	# cannot be confirmed, retain the saved rule for an explicit retry/delete.
+	jp_forward_withdraw "$section" || {
+		jp_forward_error "Hot update failed; rollback could not be confirmed. Saved rule/reservation retained; forwarding may remain active. Retry deletion. Tunnel not restarted."
+		return 1
+	}
+	uci -q delete "jp_ipoe.$section" && uci commit jp_ipoe || {
+		jp_forward_error "Runtime forward removed, but saved rule cleanup failed. Retry deletion; it may return on reconnect."
+		return 1
+	}
+	jp_forward_refresh_snat >&2 || {
+		jp_forward_error "Forward removed, but SNAT refresh failed. An extra port reservation may remain; tunnel not restarted."
+		return 1
+	}
+	jp_forward_error "Forward not applied (port became busy, allocation changed, or reload failed). Rule removed; tunnel not restarted."
+}
+
+jp_forward_remove() {
+	local section="$1" iface type
+	case "$section" in ''|*[!A-Za-z0-9_]*) jp_forward_error "Invalid forwarding rule ID."; return 1 ;; esac
+	jp_forward_clean_config || return 1
+	config_load jp_ipoe
+	config_get type "$section" TYPE
+	[ "$type" = forward ] || { jp_forward_error "Not a managed forwarding rule."; return 1; }
+	config_get iface "$section" iface ""
+	case "$iface" in ''|*[!A-Za-z0-9_]*) jp_forward_error "Invalid saved MAP-E interface."; return 1 ;; esac
+	MAPE_IFACE="$iface"
+	network_flush_cache
+	if [ "$(uci -q get network."$MAPE_IFACE".proto)" = map ] &&
+		[ "$(uci -q get network."$MAPE_IFACE".maptype)" = map-e ] && network_is_up "$MAPE_IFACE"; then
+		jp_forward_runtime && jp_forward_withdraw "$section" || {
+			jp_forward_error "Removal could not be confirmed. Saved rule/reservation retained; retry deletion. Tunnel not restarted."
+			return 1
+		}
+		# Withdraw DNAT and reload fw4 BEFORE releasing its SNAT reservation.
+		uci delete "jp_ipoe.$section" && uci commit jp_ipoe || {
+			jp_forward_error "Runtime forward removed, but saved rule cleanup failed. Retry deletion; it may return on reconnect."
+			return 1
+		}
+		jp_forward_refresh_snat >&2 || {
+			jp_forward_error "Forward removed, but SNAT refresh failed. An extra port reservation may remain; tunnel not restarted."
+			return 1
+		}
+	else
+		# Offline/stale interface: only remove saved state, never start it.
+		uci delete "jp_ipoe.$section" && uci commit jp_ipoe
+	fi
+}
+
+# Native IPv6 uses persistent fw4 ACCEPT rules, not MAP-E DNAT/SNAT.
+# The reserved section/name namespace identifies ownership. Rules remain visible
+# in LuCI Firewall and survive MAP-E stop, reconnect and package removal.
+jp_forward6_owned() {
+	local type name family target
+	case "$1" in jp_ipoe6_*) ;; *) return 1 ;; esac
+	case "$1" in *[!A-Za-z0-9_]*) return 1 ;; esac
+	config_get type "$1" TYPE
+	config_get name "$1" name
+	config_get family "$1" family
+	config_get target "$1" target
+	[ "$type" = rule ] && [ "$name" = "$1" ] &&
+		[ "$family" = ipv6 ] && [ "$target" = ACCEPT ]
+}
+
+jp_forward6_lan_valid() {
+	local device route
+	case "$1" in *[!0-9A-Fa-f:]*) return 1 ;; esac
+	case "$1" in [23][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]:*) ;; *) return 1 ;; esac
+	network_get_device device lan || return 1
+	route="$(ip -6 route get "$1" 2>/dev/null)" || return 1
+	# Kernel parsing also canonicalizes equivalent IPv6 spellings. Reject the
+	# router itself (local/lo), WAN destinations and routes via another gateway.
+	printf '%s\n' "$route" | awk -v dev="$device" '
+		NR == 1 {
+			if ($1 == "local") exit 1
+			for (i=1; i<NF; i++) {
+				if ($i == "via") exit 1
+				if ($i == "dev" && $(i+1) == dev) found=1
+			}
+			exit !found
+		}' || return 1
+	JP6_ADDRESS="$(printf '%s\n' "$route" | awk 'NR == 1 { print $1 }')"
+	[ -n "$JP6_ADDRESS" ]
+}
+
+jp_forward6_installed() {
+	local rules
+	rules="$(nft list table inet fw4 2>/dev/null)" || return 2
+	printf '%s\n' "$rules" | grep -Fq "comment \"!fw4: $1\""
+}
+
+jp_forward6_list_cb() {
+	local section="$1" address port proto enabled active=0
+	jp_forward6_owned "$section" || return 0
+	config_get address "$section" dest_ip
+	config_get port "$section" dest_port
+	config_get proto "$section" proto tcp
+	config_get_bool enabled "$section" enabled 1
+	[ "$proto" = "tcp udp" ] && proto=tcpudp
+	printf '%s\n' "$JP6_NFT" | grep -Fq "comment \"!fw4: $section\"" && active=1
+	json_add_object ""
+	json_add_string id "$section"
+	json_add_string family ipv6
+	json_add_string public_ip "$address"
+	json_add_string internal_ip "$address"
+	json_add_string external_port "$port"
+	json_add_string internal_port "$port"
+	json_add_string proto "$proto"
+	json_add_boolean active "$active"
+	json_add_boolean pending_remove "$((1 - enabled))"
+	json_add_boolean inspection_failed "$((1 - JP6_INSPECT_OK))"
+	json_close_object
+}
+
+jp_forward6_duplicate_cb() {
+	local address port proto
+	jp_forward6_owned "$1" || return 0
+	config_get address "$1" dest_ip
+	config_get port "$1" dest_port
+	config_get proto "$1" proto tcp
+	[ "$address" = "$JP6_ADDRESS" ] && [ "$port" = "$JP6_PORT" ] || return 0
+	jp_forward_protocol_overlap "$proto" "$JP6_PROTO" && JP6_DUPLICATE=1
+	return 0
+}
+
+jp_forward6_remove() {
+	local section="$1" rc
+	jp_forward_clean_config || return 1
+	config_load firewall
+	jp_forward6_owned "$section" || { jp_forward_error "Not a managed IPv6 rule."; return 1; }
+	# Keep a disabled saved rule until live withdrawal is positively confirmed.
+	if ! { uci set "firewall.$section.enabled=0" && uci commit firewall; }; then
+		uci -q revert "firewall.$section"
+		jp_forward_error "Failed to disable the saved IPv6 rule. Retry deletion."
+		return 1
+	fi
+	fw4 reload >&2 || {
+		jp_forward_error "IPv6 withdrawal failed. The disabled saved rule is retained; runtime access may remain. Retry deletion."
+		return 1
+	}
+	jp_forward6_installed "$section"; rc=$?
+	[ "$rc" = 1 ] || {
+		jp_forward_error "Cannot confirm IPv6 withdrawal. Saved rule retained; retry deletion."
+		return 1
+	}
+	if ! { uci delete "firewall.$section" && uci commit firewall; }; then
+		uci -q revert "firewall.$section"
+		jp_forward_error "IPv6 access withdrawn, but saved rule cleanup failed. Retry deletion."
+		return 1
+	fi
+}
+
+jp_forward6_add() {
+	local proto="$1" address="$2" port="$3" section token src_zone dest_zone
+	local JP6_ADDRESS JP6_PORT="$3" JP6_PROTO="$1" JP6_DUPLICATE=0
+	[ "$#" = 3 ] || return 1
+	case "$proto" in tcp|udp|tcpudp) ;; *) jp_forward_error "Protocol must be tcp, udp or tcpudp."; return 1 ;; esac
+	jp_forward_port_valid "$port" || { jp_forward_error "Invalid internal port (1-65535)."; return 1; }
+	jp_forward_clean_config || return 1
+	network_flush_cache
+	network_is_up "$WAN6_IFACE" || { jp_forward_error "The native WAN6 interface must be up."; return 1; }
+	jp_forward6_lan_valid "$address" || {
+		jp_forward_error "IPv6 destination must be a global unicast host routed directly through lan, not the router itself."
+		return 1
+	}
+	address="$JP6_ADDRESS"
+	src_zone="$(jp_forward_zone "$WAN6_IFACE")" && dest_zone="$(jp_forward_zone lan)" && [ "$src_zone" != "$dest_zone" ] || {
+		jp_forward_error "WAN6 and lan must belong to distinct, unambiguous firewall zones."
+		return 1
+	}
+	config_load firewall
+	config_foreach jp_forward6_duplicate_cb rule
+	[ "$JP6_DUPLICATE" = 0 ] || { jp_forward_error "A managed IPv6 rule already covers this endpoint/protocol. Review existing rules."; return 1; }
+	token="$(tr -d '-' < /proc/sys/kernel/random/uuid)" || return 1
+	section="jp_ipoe6_$token"
+	uci -q get "firewall.$section" >/dev/null && return 1
+	[ "$proto" = tcpudp ] && proto="tcp udp"
+	if ! { uci set "firewall.$section=rule" &&
+		uci set "firewall.$section.name=$section" &&
+		uci set "firewall.$section.family=ipv6" &&
+		uci set "firewall.$section.target=ACCEPT" &&
+		uci set "firewall.$section.src=$src_zone" &&
+		uci set "firewall.$section.dest=$dest_zone" &&
+		uci set "firewall.$section.dest_ip=$address" &&
+		uci set "firewall.$section.dest_port=$port" &&
+		uci set "firewall.$section.proto=$proto" && uci commit firewall; }; then
+		uci -q revert "firewall.$section"
+		jp_forward_error "Failed to save IPv6 rule. Inspect firewall configuration before retrying."
+		return 1
+	fi
+	if fw4 reload >&2 && jp_forward6_installed "$section"; then
+		json_init
+		json_add_string id "$section"
+		json_add_string family ipv6
+		json_add_string public_ip "$address"
+		json_add_string external_port "$port"
+		json_dump
+		return 0
+	fi
+	jp_forward6_remove "$section" || {
+		jp_forward_error "IPv6 update failed and rollback could not be confirmed. Inspect saved rules before retrying."
+		return 1
+	}
+	jp_forward_error "IPv6 rule could not be installed; rule removed."
+}
+
+jp_ipoe_config_load
+case "$1" in
+	list) jp_forward_list ;;
+	add) shift; jp_forward_add "$@" ;;
+	add6) shift; jp_forward6_add "$@" ;;
+	remove)
+		[ "$#" = 2 ] || exit 1
+		case "$2" in
+			jp_ipoe6_*) jp_forward6_remove "$2" ;;
+			*) jp_forward_remove "$2" ;;
+		esac
+	;;
+	*) exit 1 ;;
+esac

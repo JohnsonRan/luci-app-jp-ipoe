@@ -1,6 +1,7 @@
 #!/bin/sh
 
 . /lib/functions.sh
+. /usr/share/jp-ipoe/forward.sh
 
 table_name() {
 	local cfg="$1"
@@ -11,8 +12,13 @@ table_name() {
 }
 
 load_reserved_ports() {
-	config_load jp_ipoe 2>/dev/null || return 0
-	config_get DONT_SNAT_TO config dont_snat_to ""
+	local port
+	jp_forward_reserved "$1" "$2"
+	DONT_SNAT_TO="$JP_FORWARD_RESERVED"
+	for port in $DONT_SNAT_TO; do
+		jp_forward_port_valid "$port" || return 1
+	done
+	return 0
 }
 
 build_portmap() {
@@ -49,14 +55,16 @@ apply_rules() {
 	local portsets="$4"
 	local nft_table
 
-	load_reserved_ports
+	load_reserved_ports "$cfg" "$snat_ip" || return 1
+	jp_forward_select "$portsets" "$DONT_SNAT_TO" "" >/dev/null || return 1
 	build_portmap "$portsets" || return 1
 
 	nft_table="$(table_name "$cfg")"
-	nft delete table inet "$nft_table" 2>/dev/null
 
 	{
+		# One nft transaction: never expose a gap with unreserved SNAT ports.
 		printf 'add table inet %s\n' "$nft_table"
+		printf 'flush table inet %s\n' "$nft_table"
 		printf 'add chain inet %s srcnat { type nat hook postrouting priority 0; policy accept; }\n' "$nft_table"
 		printf 'add rule inet %s srcnat ip protocol icmp icmp type echo-request oifname "%s" icmp id { %s } snat ip to %s\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
 		printf 'add rule inet %s srcnat ip protocol icmp icmp type echo-request oifname "%s" icmp id != { %s } snat ip to %s : jhash ip saddr . meta l4proto . icmp id mod %s map { %s }\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
@@ -66,6 +74,51 @@ apply_rules() {
 		printf 'add rule inet %s srcnat ip protocol tcp oifname "%s" snat ip to %s : jhash ip saddr . meta l4proto . th sport mod %s map { %s }\n' "$nft_table" "$link" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
 		printf 'add rule inet %s srcnat ip protocol udp oifname "%s" snat ip to %s : jhash ip saddr . meta l4proto . th sport mod %s map { %s }\n' "$nft_table" "$link" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
 	} | nft -f -
+}
+
+# Read-only local readiness check, not a saved configuration fingerprint.
+# Unknown nft JSON shapes conservatively require the normal apply path.
+check_rules() {
+	local cfg="$1" link="$2" snat_ip="$3" portsets="$4"
+	load_reserved_ports "$cfg" "$snat_ip" || return 1
+	jp_forward_select "$portsets" "$DONT_SNAT_TO" "" >/dev/null || return 1
+	build_portmap "$portsets" || return 1
+	nft -j list table inet "$(table_name "$cfg")" | ucode -e '
+		let state = json(require("fs").stdin.read("all"));
+		let ports = json(ARGV[0]), link = ARGV[1], ip = ARGV[2];
+		let chains = filter(state.nftables, e => e.chain);
+		let rules = map(filter(state.nftables, e => e.rule), e => e.rule);
+		if (length(chains) != 1 || chains[0].chain.name != "srcnat" ||
+			chains[0].chain.type != "nat" || chains[0].chain.hook != "postrouting" ||
+			chains[0].chain.prio != 0 || chains[0].chain.policy != "accept" || length(rules) != 7) exit(1);
+		let hashes = 0, sets = 0, preserved = 0;
+		for (let r in rules) {
+			let nats = filter(r.expr, e => e.snat);
+			let devices = filter(r.expr, e => e.match?.left?.meta?.key == "oifname");
+			if (r.chain != "srcnat" || length(nats) != 1 || nats[0].snat.addr != ip ||
+				length(devices) != 1 || devices[0].match.right != link || !(devices[0].match.op in ["==", "in"])) exit(1);
+			let port = nats[0].snat.port;
+			if (port?.map) {
+				let pairs = port.map.data?.set;
+				if (port.map.key?.jhash?.mod != length(ports) || type(pairs) != "array" || length(pairs) != length(ports)) exit(1);
+				sort(pairs, (a, b) => a[0] - b[0]);
+				for (let i = 0; i < length(ports); i++)
+					if (pairs[i][0] != i || pairs[i][1] != ports[i]) exit(1);
+				hashes++;
+			} else if (port?.payload?.field == "sport") {
+				preserved++;
+			} else if (port != null) exit(1);
+			for (let e in r.expr) {
+				let m = e.match;
+				if (!(m?.left?.payload?.field in ["id", "sport"])) continue;
+				if (m.left.payload.field == "sport" && !(m.op in ["==", "in"])) exit(1);
+				let values = type(m.right) == "int" ? [m.right] : m.right?.set;
+				if (type(values) != "array" || sprintf("%J", sort(values, (a, b) => a - b)) != sprintf("%J", ports)) exit(1);
+				sets++;
+			}
+		}
+		exit(hashes == 3 && sets == 4 && preserved == 2 ? 0 : 1);
+	' "[$PORTLIST]" "$link" "$snat_ip"
 }
 
 teardown_rules() {
@@ -79,6 +132,9 @@ teardown_rules() {
 case "$1" in
 	setup)
 		apply_rules "$2" "$3" "$4" "$5"
+		;;
+	check)
+		check_rules "$2" "$3" "$4" "$5"
 		;;
 	teardown)
 		teardown_rules "$2"

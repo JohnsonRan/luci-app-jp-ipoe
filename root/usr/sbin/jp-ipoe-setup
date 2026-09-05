@@ -4,7 +4,8 @@
 # For OpenWrt 22.03+ (fw4/nftables)
 #
 # Usage:
-#   jp-ipoe-setup start   - Configure IPoE interfaces
+#   jp-ipoe-setup start   - Apply only when configuration/local readiness differs
+#   jp-ipoe-setup repair  - Force managed stop/start (interrupts traffic)
 #   jp-ipoe-setup stop    - Remove IPoE interfaces
 #   jp-ipoe-setup boot    - Run boot-time IPoE startup recovery
 #   jp-ipoe-setup status  - Print current status as JSON
@@ -624,8 +625,9 @@ validate_map_protocol() {
 		return 1
 	fi
 
-	if ! grep -q "JP_IPOE_PATCH_VERSION=" "$our_map" 2>/dev/null; then
-		log "Patched MAP-E protocol script is not installed at $our_map; installing it now."
+	if ! grep -q "JP_IPOE_PATCH_VERSION=" "$our_map" 2>/dev/null ||
+		! cmp -s "$our_map" /usr/share/jp-ipoe/map.sh; then
+		log "Patched MAP-E protocol script is missing or differs from the bundled version; installing it now."
 		if [ ! -f "$installer" ]; then
 			log_err "MAP-E protocol installer not found at $installer"
 			return 1
@@ -953,14 +955,155 @@ run_start_pipeline() {
 	bringup_mape
 }
 
-# Main start command
+# Compare owned UCI options, treating an absent optional value as empty.
+# Never use a last-applied fingerprint: SSH edits and runtime drift matter.
+option_matches() {
+	local actual
+	actual="$(uci -q get "$1" 2>/dev/null)"
+	[ "$actual" = "$2" ]
+}
+
+configuration_is_current() (
+	local package changes section key value wan6_dev ipv6 prefix="" mac duid
+	local wan_zone networks peer legacy="" rule saved fresh suffix ip4 ports link mtu status expected
+	validate_config || return 1
+	cmp -s /lib/netifd/proto/map.sh /usr/share/jp-ipoe/map.sh || return 1
+	# Pending external edits do not prove the running services received them.
+	for package in network firewall dhcp; do
+		changes="$(uci changes "$package")" && [ -z "$changes" ] || return 1
+	done
+	network_flush_cache
+	network_is_up "$WAN6_IFACE" && network_is_up "$MAPE_IFACE" || return 1
+	network_get_device wan6_dev "$WAN6_IFACE" && [ "$wan6_dev" = "$WAN_DEVICE" ] || return 1
+	network_get_subnet6 ipv6 "$WAN6_IFACE" && [ -n "$ipv6" ] || return 1
+	if wan6_ip6prefix_required; then
+		prefix="$(get_ipv6_prefix "$WAN6_IFACE" "$wan6_dev")" || return 1
+	fi
+	mac="$(get_device_mac "$WAN_DEVICE")" || return 1
+	duid="$(uci -q get network."$WAN6_IFACE".clientid)"
+	[ -n "$duid" ] || duid="$(uci -q get network.globals.dhcp_default_duid)"
+	[ "$(normalize_hex_id "$duid")" = "00030001$mac" ] || return 1
+	section="$(find_network_device_section "$WAN_DEVICE")"
+	[ -z "$section" ] || option_matches "network.$section.ipv6" 1 || return 1
+	[ "$AUTO" != 1 ] || apply_auto_params || return 1
+	peer="$(resolve_br_addr "$WAN6_IFACE" "$BR_ADDR" "$LEGACYMAP")" || return 1
+	[ "$LEGACYMAP" = 1 ] && legacy=1
+	while read -r key value; do
+		option_matches "$key" "$value" || return 1
+	done <<EOF
+network.$WAN6_IFACE interface
+network.$WAN6_IFACE.device $WAN_DEVICE
+network.$WAN6_IFACE.proto dhcpv6
+network.$WAN6_IFACE.reqaddress try
+network.$WAN6_IFACE.reqprefix auto
+network.$WAN6_IFACE.ip6assign 64
+network.$WAN6_IFACE.ip6prefix $prefix
+network.$MAPE_IFACE interface
+network.$MAPE_IFACE.proto map
+network.$MAPE_IFACE.maptype map-e
+network.$MAPE_IFACE.peeraddr $peer
+network.$MAPE_IFACE.tunlink $WAN6_IFACE
+network.$MAPE_IFACE.encaplimit ignore
+network.$MAPE_IFACE.mtu $MAPE_MTU
+network.$MAPE_IFACE.legacymap $legacy
+network.$MAPE_IFACE.ipaddr $IPADDR
+network.$MAPE_IFACE.ip4prefixlen $IP4PREFIXLEN
+network.$MAPE_IFACE.ip6prefix $IP6PREFIX
+network.$MAPE_IFACE.ip6prefixlen $IP6PREFIXLEN
+network.$MAPE_IFACE.ealen $EALEN
+network.$MAPE_IFACE.psidlen $PSIDLEN
+network.$MAPE_IFACE.offset $OFFSET
+EOF
+	# An opaque custom rule/PSID bypasses these bounds; do not guess equivalence.
+	option_matches "network.$MAPE_IFACE.rule" "" && option_matches "network.$MAPE_IFACE.psid" "" || return 1
+	wan_zone="$(find_firewall_zone wan "$WAN6_IFACE" wan)" || return 1
+	networks="$(get_firewall_zone_networks "$wan_zone")"
+	list_contains networks "$WAN6_IFACE" && list_contains networks "$MAPE_IFACE" || return 1
+	for section in $(find_wan_pppoe_sections); do
+		option_matches "network.$section.metric" "$PPPOE_FALLBACK_METRIC" || return 1
+	done
+	option_matches "dhcp.$WAN6_IFACE" dhcp && option_matches "dhcp.$WAN6_IFACE.interface" "$WAN6_IFACE" || return 1
+	if [ "$DHCPV6_RELAY" = 1 ]; then
+		option_matches "dhcp.$WAN6_IFACE.master" 1 && option_matches "dhcp.$WAN6_IFACE.ndproxy_routing" 1 || return 1
+		for key in ra dhcpv6 ndp; do option_matches "dhcp.$WAN6_IFACE.$key" relay || return 1; done
+		if uci -q get dhcp.lan >/dev/null; then
+			option_matches dhcp.lan.master "" || return 1
+			for key in ra dhcpv6 ndp; do option_matches "dhcp.lan.$key" relay || return 1; done
+		fi
+	else
+		option_matches "dhcp.$WAN6_IFACE.master" "" && option_matches "dhcp.$WAN6_IFACE.ndproxy_routing" "" || return 1
+		for key in ra dhcpv6 ndp; do option_matches "dhcp.$WAN6_IFACE.$key" disabled || return 1; done
+		if uci -q get dhcp.lan >/dev/null; then
+			option_matches dhcp.lan.ra server && option_matches dhcp.lan.dhcpv6 server && option_matches dhcp.lan.ndp "" || return 1
+		fi
+	fi
+	/etc/init.d/odhcpd running || return 1
+
+	# Compare the running MAP rule with current bounds AND a fresh calculation
+	# for this WAN6 prefix, rather than trusting a stale /tmp rule file alone.
+	rule="type=map-e,ipv6prefix=$IP6PREFIX,prefix6len=$IP6PREFIXLEN,ipv4prefix=$IPADDR,prefix4len=${IP4PREFIXLEN:-32}"
+	[ -z "$PSIDLEN" ] || rule="$rule,psidlen=$PSIDLEN"
+	[ -z "$OFFSET" ] || rule="$rule,offset=$OFFSET"
+	[ -z "$EALEN" ] || rule="$rule,ealen=$EALEN"
+	[ -z "$peer" ] || rule="$rule,br=$peer"
+	read -r saved < "/tmp/map-$MAPE_IFACE.rules" || return 1
+	[ "$saved" = "rule=$rule" ] || return 1
+	saved="$(sed '1d' "/tmp/map-$MAPE_IFACE.rules")"
+	fresh="$(LEGACY="$LEGACYMAP" mapcalc "$WAN6_IFACE" "$rule")" || return 1
+	for suffix in IPV4ADDR IPV6ADDR BR PORTSETS; do
+		value="$(jp_ipoe_mapcalc_lookup "$fresh" "$suffix")"
+		[ -n "$value" ] && [ "$(jp_ipoe_mapcalc_lookup "$saved" "$suffix")" = "$value" ] || return 1
+	done
+	ip4="$(jp_ipoe_mapcalc_lookup "$fresh" IPV4ADDR)"
+	ports="$(jp_ipoe_mapcalc_lookup "$fresh" PORTSETS)"
+	network_get_device link "$MAPE_IFACE" && [ "$link" = "map-$MAPE_IFACE" ] || return 1
+	network_get_ipaddr value "$MAPE_IFACE" && [ "$value" = "$ip4" ] || return 1
+	read -r mtu < "/sys/class/net/$link/mtu" || return 1
+	[ "$mtu" = "$MAPE_MTU" ] || return 1
+	ip -4 addr show dev "$link" | grep -Fq "inet $ip4/" || return 1
+	[ -n "$(ip -4 route show default dev "$link")" ] || return 1
+	nft list table inet fw4 >/dev/null || return 1
+	sh /usr/libexec/jp-ipoe-map-nft check "$MAPE_IFACE" "$link" "$ip4" "$ports" || return 1
+
+	. /usr/share/libubox/jshn.sh
+	. /usr/share/jp-ipoe/forward.sh
+	status="$(ubus call "network.interface.$MAPE_IFACE" status)" || return 1
+	json_init
+	json_add_array firewall
+	jp_forward_emit "$MAPE_IFACE" "$ip4" "$ports"
+	json_close_array
+	expected="$(json_dump)"
+	ucode -e '
+		function canonical(v) {
+			if (type(v) == "array") return map(v, canonical);
+			if (type(v) != "object") return v;
+			let out = {}; for (let key in sort(keys(v))) out[key] = canonical(v[key]); return out;
+		}
+		let state = json(ARGV[0]), expected = json(ARGV[1]);
+		if (!state.up || type(state.data?.firewall) != "array") exit(1);
+		let actual = filter(state.data.firewall, r => type(r.name) == "string" && index(r.name, "jp_ipoe_") == 0);
+		sort(actual, (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+		sort(expected.firewall, (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+		exit(sprintf("%J", canonical(actual)) == sprintf("%J", canonical(expected.firewall)) ? 0 : 1);
+	' "$status" "$expected"
+)
+
+# Main start command; repair bypasses only the read-only shortcut.
 cmd_start() {
 	jp_ipoe_config_load
+
+	if [ "$1" != force ] && configuration_is_current >/dev/null 2>&1; then
+		uci commit jp_ipoe || { log_err "Failed to save JP IPoE settings."; return 1; }
+		log "IPoE configuration already matches the running setup; no restart needed."
+		printf 'JP_IPOE_UNCHANGED=1\n'
+		return 0
+	fi
 
 	log "Starting JP IPoE setup (MAP-E)..."
 	log "WAN device: $WAN_DEVICE, WAN6: $WAN6_IFACE, MAP-E: $MAPE_IFACE"
 
 	run_start_pipeline || return 1
+	uci commit jp_ipoe || { log_err "Failed to save JP IPoE settings."; return 1; }
 	log "JP IPoE setup complete!"
 }
 
@@ -971,6 +1114,12 @@ cmd_stop() {
 	log "Stopping JP IPoE interfaces..."
 	teardown_managed_ipoe
 	log "Done."
+}
+
+# Explicit recovery uses the existing stop/start path, even if UCI is unchanged.
+cmd_repair() {
+	cmd_stop
+	cmd_start force
 }
 
 cmd_boot() {
@@ -987,7 +1136,7 @@ cmd_boot() {
 
 	restart_wan6_interface "$WAN6_IFACE" || true
 
-	cmd_start
+	cmd_start force
 }
 
 # Serialize mutating operations so a LuCI apply, an SSH run, and the boot
@@ -1041,13 +1190,19 @@ run_locked() {
 # Entry point
 case "$1" in
 	start)   run_locked cmd_start ;;
+	repair)  run_locked cmd_repair ;;
 	stop)    run_locked cmd_stop ;;
 	boot)    run_locked cmd_boot ;;
 	status)  cmd_status ;;
 	detect_br) cmd_detect_br ;;
 	resolve) cmd_resolve ;;
+	forward_list) sh /usr/libexec/jp-ipoe-forward list ;;
+	forward_devices) ubus call luci-rpc getHostHints '{}' ;;
+	forward_add) shift; run_locked sh /usr/libexec/jp-ipoe-forward add "$@" ;;
+	forward_add6) shift; run_locked sh /usr/libexec/jp-ipoe-forward add6 "$@" ;;
+	forward_remove) shift; run_locked sh /usr/libexec/jp-ipoe-forward remove "$@" ;;
 	*)
-		echo "Usage: $0 {start|stop|boot|status|detect_br|resolve}"
+		echo "Usage: $0 {start|repair|stop|boot|status|detect_br|resolve|forward_list|forward_devices|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
 		exit 1
 		;;
 esac

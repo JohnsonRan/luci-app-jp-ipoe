@@ -20,6 +20,16 @@ jp_ipoe_config_load() {
 	config_get_bool DHCPV6_RELAY config dhcpv6_relay "1"
 }
 
+# Per-rule defaults; forward sections are created only by explicit user action.
+jp_forward_load_rule() {
+	config_get JP_F_IFACE "$1" iface ""
+	config_get JP_F_PUBLIC "$1" public_ip ""
+	config_get JP_F_PORT "$1" external_port ""
+	config_get JP_F_IP "$1" internal_ip ""
+	config_get JP_F_DEST "$1" internal_port ""
+	config_get JP_F_PROTO "$1" proto ""
+}
+
 # Read a value from `mapcalc` rule output, preferring the matched rule
 # (RULE_BMR) and falling back to RULE_1. Shared by jp-ipoe-setup and
 # jp-ipoe-info so the lookup logic stays in one place.
