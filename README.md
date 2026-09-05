@@ -23,10 +23,10 @@ ISPs with NTT mostly support both IPv4 & IPv6 implementations, while former one 
 
 - OpenWrt 22.03 or newer with fw4/nftables
 - LuCI
-- `map` package
+- `map` and `conntrack` packages
 - a working IPv6 WAN interface using DHCPv6, usually named `wan6`
 
-The package depends on `map`. On install, it also copies the bundled patched MAP protocol script to `/lib/netifd/proto/map.sh`. If an unpatched stock script already exists, it is backed up to `/lib/netifd/proto/map.sh.orig`.
+The package depends on `map` and `conntrack`. On install, it also copies the bundled patched MAP protocol script to `/lib/netifd/proto/map.sh`. If an unpatched stock script already exists, it is backed up to `/lib/netifd/proto/map.sh.orig`.
 
 ## Supported Scope
 
@@ -104,12 +104,38 @@ Running `Apply IPoE Configuration` executes:
 /usr/sbin/jp-ipoe-setup start
 ```
 
+Normal Apply / `start` first performs a read-only comparison with the **actual
+managed UCI configuration and locally observable runtime**, not a saved success
+hash or the frontend dirty flag. It checks WAN6 device/DUID/prefix settings,
+MAP bounds and a fresh `mapcalc` result against the running rule, firewall zone
+membership, PPPoE metrics, DHCP relay settings/service state, the tunnel address,
+MTU/default route, the live SNAT port pool, and managed netifd forwarding data.
+
+When these checks agree, it saves the plugin settings (including boot-only
+options) and reports **no restart needed**, without rewriting network/DHCP/firewall
+configuration or reloading those services. CLI stdout is `JP_IPOE_UNCHANGED=1`.
+A mismatch, missing state, custom opaque MAP rule, or an unsupported inspection
+result conservatively falls back to the existing full setup. This is local
+readiness, not an Internet reachability test or a comprehensive custom nft audit.
+
+Use **Force Reconnect / Repair** when the interface appears connected but does
+not work. It requires confirmation in LuCI and deliberately runs the existing
+managed stop/start path, bypassing the shortcut:
+
+```sh
+jp-ipoe-setup repair
+```
+
+**Repair can interrupt IPv4 and IPv6 traffic.** Ordinary port-forward edits
+remain on their separate hot-update path. No last-success snapshot is stored.
+The no-op guard and supported nft JSON shapes still require real-device acceptance.
+
 During router boot, including the first boot after firmware refresh, the init service runs:
 
 1. `/usr/sbin/jp-ipoe-setup stop`
 2. stops WAN PPPoE fallback interfaces such as `pppoe-wan`
 3. restarts the WAN6 interface
-4. runs `/usr/sbin/jp-ipoe-setup start`
+4. runs the full JP IPoE start pipeline, bypassing the no-op shortcut
 5. starts the stopped PPPoE fallback interfaces only after JP IPoE startup succeeds
 
 Normal service start, service restart, and LuCI apply actions run the regular start/stop path without this boot-only WAN6 recovery sequence.
@@ -171,12 +197,120 @@ OpenWrt 24.10 users may still need this patched script; do not assume the stock 
 
 The `Auto-Detect BR Address` button runs `mapcalc` and can save the detected BR address into the plugin configuration.
 
+## Locally Checked Port Forwarding
+
+Open **Port Forwarding** and select **IPv4**, **IPv6**, or **IPv4 + IPv6**.
+The device selector uses LuCI's existing host hints to show names, MACs and
+IPv4 addresses. Selecting a device fills its current IPv4 and global IPv6
+addresses; additional IPv6 candidates are offered by the IPv6 input. Manual
+entry remains available. This is **not a MAC binding** and does not follow DHCP
+or IPv6 privacy-address changes. Verify the selected addresses and service;
+prefer stable addresses. The list may omit devices not currently known to LuCI.
+
+### MAP-E IPv4
+
+MAP-E must be up. Enter a host in the main `lan` IPv4 subnet, its service port,
+and TCP, UDP, or both. Leave the external port
+empty to choose an assigned port automatically, or specify one for validation.
+An example is `203.0.113.1:24080 → 192.168.1.10:8080`: only the **public** port
+must belong to your MAP-E allocation.
+
+- Checks assigned ranges, manual reservations, protocol-aware configured
+  firewall redirects (conservatively across zones/addresses), router bindings
+  including IPv6 sockets, and current outbound conntrack mappings.
+- Requires `conntrack` and readable kernel socket tables. Running `miniupnpd`
+  blocks creation/activation; stop and disable UPnP first. Arbitrary custom nft
+  rules, other dynamic mapping services, and external reachability are **not**
+  verified. Later configuration changes can still introduce conflicts.
+- Stores `forward` sections in `/etc/config/jp_ipoe`; adds no persistent firewall
+  redirects and does not rewrite `dont_snat_to`. The SNAT helper excludes the
+  union of manual reservations and managed ports for the current public IPv4.
+  At least one assigned port must remain for outbound NAT. Managed reservations
+  exclude both TCP and UDP, even for a single-protocol forward.
+- **Add/delete hot-updates rules without restarting MAP-E or clearing existing
+  connections.** Addition atomically reserves SNAT ports, rechecks local
+  bindings, updates the selected netifd firewall entry through `set_data`, then
+  reloads fw4. Other interface data and firewall entries are preserved. Deletion
+  withdraws DNAT and reloads fw4 before releasing the saved SNAT reservation;
+  existing sessions can continue until they naturally end. `ucode` (provided by
+  fw4) merges the JSON data; no tunnel/network restart or conntrack flush is used.
+- A raced/busy port is rejected, not forcibly freed. Failed updates attempt
+  rollback without restarting the tunnel. If withdrawal cannot be confirmed,
+  the saved rule/reservation is retained and the error explicitly warns that
+  forwarding may remain active. Retry deletion; do not assume failure means
+  the rule is absent. A failed SNAT refresh can temporarily leave an extra
+  reservation rather than risk a collision.
+- Saved IPv4 rules survive plugin/router restarts; enabled IPoE boot startup
+  restores the tunnel and rechecks them. Stopping MAP-E withdraws live redirects,
+  not their saved configuration. On reconnect, incompatible public
+  IPv4/port allocations, changed LAN subnets, or detected local conflicts leave
+  rules inactive instead of silently changing their external port. Delete and
+  recreate an inactive rule. The UI's “Published to tunnel” means netifd carries
+  the redirect, **not** that an external client reached the service.
+- No NAT loopback/reflection. Test connectivity from outside your LAN. Secure
+  the target service before exposing it to the Internet.
+
+### Native IPv6 and dual stack
+
+IPv6 is a persistent fw4 **ACCEPT traffic rule**, not NAT66. Connect to the
+**device's global IPv6 address and service port**, for example
+`[2001:db8::10]:8080` (documentation address; use your device's actual address).
+No MAP-E port allocation or SNAT reservation is involved. The native WAN6
+interface must be up; the destination must be routed directly through `lan`,
+not the router itself, a link-local/ULA address, a WAN destination or a host
+behind another gateway. Checks cover the LAN route and duplicate managed
+endpoint/protocol rules, not service availability or other firewall policies.
+
+- Rules are stored in `/etc/config/firewall`, using the reserved
+  `jp_ipoe6_*` section/name namespace, and remain visible in **Firewall → Traffic
+  Rules**. **Stopping MAP-E or uninstalling this plugin does not remove them.**
+  Delete them explicitly. Recreate rules after the device's IPv6 address changes.
+- Add/delete uses fw4 reload without restarting interfaces or flushing conntrack.
+  Deletion first saves the rule disabled, reloads fw4 and confirms withdrawal,
+  then deletes saved state. Unconfirmed withdrawal retains the disabled saved
+  rule for retry; runtime access may still exist. Other rules or existing
+  connections may still permit access after this rule is removed.
+- “Firewall rule installed” only indicates that its named rule was found in the
+  live ruleset. An inspection failure is shown as **state unavailable**, not as
+  proof that access is closed. Neither status proves external reachability.
+- **IPv4 + IPv6 creates two independent rules sequentially**, not an atomic pair.
+  On failure, already successful rules remain and the UI warns of possible
+  partial completion. Review the list and add only the missing family rather
+  than blindly retrying both.
+
+CLI equivalents (mutations use the same setup lock):
+
+```sh
+jp-ipoe-setup forward_list
+jp-ipoe-setup forward_devices
+jp-ipoe-setup forward_add6 tcp 2001:db8::10 8080  # replace with actual device GUA
+jp-ipoe-setup forward_add tcp 192.168.1.10 8080
+jp-ipoe-setup forward_add tcpudp 192.168.1.10 8080 24080
+jp-ipoe-setup forward_remove cfg012345  # IPv4 ID from forward_list
+# Use forward_remove with the full jp_ipoe6_* ID to remove an IPv6 rule.
+```
+
+Local regression checks (Node.js + POSIX sh/awk, no npm dependencies):
+
+```sh
+node tests/port-forwarding.cjs
+```
+
+These checks mock OpenWrt services. Real netifd/fw4 operation, nft kernel rule
+acceptance, uninterrupted existing traffic during hot updates, reconnect behavior
+and packet forwarding still require a router test. No zero-packet-loss claim is made.
+The new MAC/native-IPv6/dual-stack changes have not been deployed or accepted on a
+router. Acceptance requires separate authorization to deploy the backend and open
+one specified IPv6 service, test external access, delete the rule and check its
+persistence; reboot/restart testing needs an explicitly approved interruption.
+
 ## CLI
 
 The LuCI buttons call the same script you can use over SSH:
 
 ```sh
 /usr/sbin/jp-ipoe-setup start
+/usr/sbin/jp-ipoe-setup repair  # explicitly stop/rebuild managed IPoE
 /usr/sbin/jp-ipoe-setup stop
 /usr/sbin/jp-ipoe-setup status
 /usr/sbin/jp-ipoe-setup detect_br
