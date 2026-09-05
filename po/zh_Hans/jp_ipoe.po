@@ -24,10 +24,8 @@ msgid "Apply or remove IPoE configuration immediately."
 msgstr "立即应用或移除 IPoE 配置。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:161
-msgid ""
-"Applying IPoE configuration. Please wait ~30 seconds for IPv6 prefix "
-"detection."
-msgstr "应用 IPoE 配置中，请等待最多30秒来获取 IPv6 前缀"
+msgid "Checking IPoE configuration. Changes or repairs may take around 30 seconds."
+msgstr "正在检查 IPoE 配置；如需应用变更或修复，可能需要约 30 秒。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:63
 msgid "Assigned Port Ranges"
@@ -381,3 +379,177 @@ msgstr "WAN6 接口"
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:268
 msgid "offset"
 msgstr "offset"
+
+msgid "Port Forwarding"
+msgstr "端口转发"
+
+msgid "Only assigned public IPv4 ports can be forwarded; LAN service ports are unrestricted. Checks cover configured redirects, router bindings and current outbound NAT, not Internet reachability or arbitrary custom nftables rules. Stop UPnP before use."
+msgstr "只有分配到的公网 IPv4 端口可用于转发，内网服务端口不受此限制。检查覆盖已配置的转发规则、路由器绑定端口和当前出站 NAT，不代表公网可达，也不检查任意自定义 nftables 规则。使用前请停止 UPnP。"
+
+msgid "Rules target the main lan IPv4 subnet. Ports are automatically excluded from outbound NAT without changing manual reservations. A changed public IPv4 or incompatible port allocation suspends the rule; delete and recreate it."
+msgstr "目标须位于主 lan 接口的 IPv4 子网。转发端口自动从出站 NAT 池排除，不修改手工保留端口。公网 IPv4 改变或端口不再属于分配范围时，规则暂停，请删除后重新创建。"
+
+msgid "Protocol"
+msgstr "协议"
+
+msgid "LAN IPv4 Address"
+msgstr "内网 IPv4 地址"
+
+msgid "Internal Port"
+msgstr "内网端口"
+
+msgid "External Port"
+msgstr "外部端口"
+
+msgid "Check & Add Forward"
+msgstr "检查并添加转发"
+
+msgid "MAP-E is down. Start IPoE before adding a forward."
+msgstr "MAP-E 未连接，请先启动 IPoE 再添加转发。"
+
+msgid "Public Endpoint"
+msgstr "公网地址与端口"
+
+msgid "LAN Endpoint"
+msgstr "内网地址与端口"
+
+msgid "Published to tunnel"
+msgstr "已发布到隧道"
+
+msgid "Inactive (tunnel down, allocation changed or local check failed)"
+msgstr "未生效（隧道未连接、分配变化或本地检查失败）"
+
+msgid "Delete"
+msgstr "删除"
+
+msgid "No managed port forwards."
+msgstr "尚未创建端口转发。"
+
+msgid "Apply Port Forwarding"
+msgstr "应用端口转发"
+
+msgid "Rules are updated live without restarting MAP-E or clearing existing connections."
+msgstr "规则将实时更新，不会重启 MAP-E 或清除现有连接。"
+
+msgid "The selected LAN service will be exposed to the Internet. Secure it before continuing. Local checks cannot guarantee future availability."
+msgstr "选定的内网服务将开放到公网，请先确保服务安全。本地检查不能保证端口今后始终可用。"
+
+msgid "Existing sessions may continue after deletion. Only new connections will be blocked."
+msgstr "删除后已有会话可能继续，只有新连接会被阻止。"
+
+msgid "Port forward removed."
+msgstr "端口转发已删除。"
+
+msgid "Port forward added:"
+msgstr "端口转发已添加："
+
+msgid "Confirm"
+msgstr "确认"
+
+msgid "Stop MAP-E now? IPv4 traffic using IPoE will be interrupted."
+msgstr "现在停止 MAP-E？通过 IPoE 传输的 IPv4 流量将中断。"
+
+msgid "Unable to refresh. The displayed port-forwarding state may be outdated."
+msgstr "刷新失败，当前显示的端口转发状态可能已过期。"
+
+msgid "A port-forwarding operation is in progress. Please wait."
+msgstr "端口转发操作正在进行，请稍候。"
+
+msgid "Automatic port"
+msgstr "自动选择端口"
+
+msgid "IPoE configuration already matches the running setup. No restart needed."
+msgstr "IPoE 配置与当前运行状态一致，无需重启。"
+
+msgid "Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic."
+msgstr "强制重连并修复 IPoE？这将执行完整配置流程，可能中断 IPv4 和 IPv6 流量。"
+
+msgid "Force Reconnect / Repair"
+msgstr "强制重连 / 修复"
+
+msgid "Use when IPoE appears connected but does not work. Bypasses the unchanged-configuration check."
+msgstr "用于 IPoE 显示已连接但实际不可用的情况，将跳过配置未变化检查。"
+
+msgid "Public IPv4"
+msgstr "公网 IPv4"
+
+msgid "Loading..."
+msgstr "正在加载…"
+
+msgid "Add a forward"
+msgstr "新增转发"
+
+msgid "Leave the external port empty for automatic selection. Make sure the LAN service is reachable first."
+msgstr "外部端口留空即自动选择。请先确认目标服务在内网可达。"
+
+msgid "Existing forwards"
+msgstr "已有转发"
+
+msgid "Published rules are not proof of Internet reachability."
+msgstr "规则已发布不代表公网已连通。"
+
+msgid "Checks and limitations"
+msgstr "检查范围与使用限制"
+
+msgid "MAP-E connected"
+msgstr "MAP-E 已连接"
+
+msgid "Assigned ports"
+msgstr "已分配端口"
+
+msgid "Port ranges"
+msgstr "端口段"
+
+msgid "Native IPv6 rules are not removed by stopping MAP-E."
+msgstr "停止 MAP-E 不会撤销原生 IPv6 放行规则。"
+
+msgid "Leave the IPv4 external port empty for automatic selection. IPv6 uses the device address and service port directly."
+msgstr "IPv4 外部端口留空即自动选择。IPv6 直接使用设备的公网地址和服务端口。"
+
+msgid "Device (MAC)"
+msgstr "设备（MAC）"
+
+msgid "Enter addresses manually"
+msgstr "手动输入地址"
+
+msgid "IP version"
+msgstr "IP 版本"
+
+msgid "Device selection fills current addresses only; it does not track MAC or address changes. Verify the address and LAN service first."
+msgstr "设备选择仅填入当前地址，不会跟随 MAC 或地址变化。请先核对地址并确认内网服务可达。"
+
+msgid "Device public IPv6"
+msgstr "设备公网 IPv6"
+
+msgid "Service Port"
+msgstr "服务端口"
+
+msgid "IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes."
+msgstr "IPv6 放行规则独立持久保存，停止或卸载本插件也不会撤销。请在此处或防火墙通信规则中单独删除；IPv6 地址变化后需重新创建。"
+
+msgid "IPv4 checks port allocation and local NAT conflicts. IPv6 checks the LAN route and duplicate managed rules, not service availability or other firewall policies."
+msgstr "IPv4 检查端口分配与本地 NAT 冲突。IPv6 仅检查 LAN 路由和本插件规则重复，不检测服务可用性或其他防火墙策略。"
+
+msgid "Unable to load devices. Enter addresses manually."
+msgstr "无法加载设备列表，请手动输入地址。"
+
+msgid "MAP-E is down. IPv4 forwarding requires IPoE; IPv6 uses the native connection."
+msgstr "MAP-E 未连接。IPv4 转发需要启动 IPoE，IPv6 放行使用原生连接。"
+
+msgid "Removal pending; retry deletion"
+msgstr "删除未完成，请重试"
+
+msgid "Firewall rule installed"
+msgstr "已安装防火墙规则"
+
+msgid "Firewall state unavailable"
+msgstr "无法确认防火墙运行状态"
+
+msgid "Deletion removes only this rule. Existing sessions or other firewall rules may still allow access."
+msgstr "删除仅撤销本条规则。已有连接或其他防火墙规则可能仍允许访问。"
+
+msgid "Dual stack creates two independent rules. If one fails, review the saved rules before retrying; a successful rule is kept."
+msgstr "双栈会分别创建两条独立规则。如其中一条失败，已成功的规则会保留；请检查已有规则后再补充失败的一项。"
+
+msgid "Partial completion is possible. Review existing rules before retrying."
+msgstr "操作可能仅部分完成，请先检查已有规则再重试。"

@@ -14,9 +14,7 @@ msgid "Apply or remove IPoE configuration immediately."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:161
-msgid ""
-"Applying IPoE configuration. Please wait ~30 seconds for IPv6 prefix "
-"detection."
+msgid "Checking IPoE configuration. Changes or repairs may take around 30 seconds."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:63
@@ -364,4 +362,178 @@ msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:268
 msgid "offset"
+msgstr ""
+
+msgid "Port Forwarding"
+msgstr ""
+
+msgid "Only assigned public IPv4 ports can be forwarded; LAN service ports are unrestricted. Checks cover configured redirects, router bindings and current outbound NAT, not Internet reachability or arbitrary custom nftables rules. Stop UPnP before use."
+msgstr ""
+
+msgid "Rules target the main lan IPv4 subnet. Ports are automatically excluded from outbound NAT without changing manual reservations. A changed public IPv4 or incompatible port allocation suspends the rule; delete and recreate it."
+msgstr ""
+
+msgid "Protocol"
+msgstr ""
+
+msgid "LAN IPv4 Address"
+msgstr ""
+
+msgid "Internal Port"
+msgstr ""
+
+msgid "External Port"
+msgstr ""
+
+msgid "Check & Add Forward"
+msgstr ""
+
+msgid "MAP-E is down. Start IPoE before adding a forward."
+msgstr ""
+
+msgid "Public Endpoint"
+msgstr ""
+
+msgid "LAN Endpoint"
+msgstr ""
+
+msgid "Published to tunnel"
+msgstr ""
+
+msgid "Inactive (tunnel down, allocation changed or local check failed)"
+msgstr ""
+
+msgid "Delete"
+msgstr ""
+
+msgid "No managed port forwards."
+msgstr ""
+
+msgid "Apply Port Forwarding"
+msgstr ""
+
+msgid "Rules are updated live without restarting MAP-E or clearing existing connections."
+msgstr ""
+
+msgid "The selected LAN service will be exposed to the Internet. Secure it before continuing. Local checks cannot guarantee future availability."
+msgstr ""
+
+msgid "Existing sessions may continue after deletion. Only new connections will be blocked."
+msgstr ""
+
+msgid "Port forward removed."
+msgstr ""
+
+msgid "Port forward added:"
+msgstr ""
+
+msgid "Confirm"
+msgstr ""
+
+msgid "Stop MAP-E now? IPv4 traffic using IPoE will be interrupted."
+msgstr ""
+
+msgid "Unable to refresh. The displayed port-forwarding state may be outdated."
+msgstr ""
+
+msgid "A port-forwarding operation is in progress. Please wait."
+msgstr ""
+
+msgid "Automatic port"
+msgstr ""
+
+msgid "IPoE configuration already matches the running setup. No restart needed."
+msgstr ""
+
+msgid "Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic."
+msgstr ""
+
+msgid "Force Reconnect / Repair"
+msgstr ""
+
+msgid "Use when IPoE appears connected but does not work. Bypasses the unchanged-configuration check."
+msgstr ""
+
+msgid "Public IPv4"
+msgstr ""
+
+msgid "Loading..."
+msgstr ""
+
+msgid "Add a forward"
+msgstr ""
+
+msgid "Leave the external port empty for automatic selection. Make sure the LAN service is reachable first."
+msgstr ""
+
+msgid "Existing forwards"
+msgstr ""
+
+msgid "Published rules are not proof of Internet reachability."
+msgstr ""
+
+msgid "Checks and limitations"
+msgstr ""
+
+msgid "MAP-E connected"
+msgstr ""
+
+msgid "Assigned ports"
+msgstr ""
+
+msgid "Port ranges"
+msgstr ""
+
+msgid "Native IPv6 rules are not removed by stopping MAP-E."
+msgstr ""
+
+msgid "Leave the IPv4 external port empty for automatic selection. IPv6 uses the device address and service port directly."
+msgstr ""
+
+msgid "Device (MAC)"
+msgstr ""
+
+msgid "Enter addresses manually"
+msgstr ""
+
+msgid "IP version"
+msgstr ""
+
+msgid "Device selection fills current addresses only; it does not track MAC or address changes. Verify the address and LAN service first."
+msgstr ""
+
+msgid "Device public IPv6"
+msgstr ""
+
+msgid "Service Port"
+msgstr ""
+
+msgid "IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes."
+msgstr ""
+
+msgid "IPv4 checks port allocation and local NAT conflicts. IPv6 checks the LAN route and duplicate managed rules, not service availability or other firewall policies."
+msgstr ""
+
+msgid "Unable to load devices. Enter addresses manually."
+msgstr ""
+
+msgid "MAP-E is down. IPv4 forwarding requires IPoE; IPv6 uses the native connection."
+msgstr ""
+
+msgid "Removal pending; retry deletion"
+msgstr ""
+
+msgid "Firewall rule installed"
+msgstr ""
+
+msgid "Firewall state unavailable"
+msgstr ""
+
+msgid "Deletion removes only this rule. Existing sessions or other firewall rules may still allow access."
+msgstr ""
+
+msgid "Dual stack creates two independent rules. If one fails, review the saved rules before retrying; a successful rule is kept."
+msgstr ""
+
+msgid "Partial completion is possible. Review existing rules before retrying."
 msgstr ""
