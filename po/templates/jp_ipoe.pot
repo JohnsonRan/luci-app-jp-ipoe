@@ -379,16 +379,10 @@ msgstr ""
 msgid "LAN IPv4 Address"
 msgstr ""
 
-msgid "Internal Port"
-msgstr ""
-
 msgid "External Port"
 msgstr ""
 
 msgid "Check & Add Forward"
-msgstr ""
-
-msgid "MAP-E is down. Start IPoE before adding a forward."
 msgstr ""
 
 msgid "Public Endpoint"
@@ -416,9 +410,6 @@ msgid "Rules are updated live without restarting MAP-E or clearing existing conn
 msgstr ""
 
 msgid "The selected LAN service will be exposed to the Internet. Secure it before continuing. Local checks cannot guarantee future availability."
-msgstr ""
-
-msgid "Existing sessions may continue after deletion. Only new connections will be blocked."
 msgstr ""
 
 msgid "Port forward removed."
@@ -461,9 +452,6 @@ msgid "Loading..."
 msgstr ""
 
 msgid "Add a forward"
-msgstr ""
-
-msgid "Leave the external port empty for automatic selection. Make sure the LAN service is reachable first."
 msgstr ""
 
 msgid "Existing forwards"

@@ -174,6 +174,25 @@ jp_forward_emit wan6mape 203.0.113.1 '1000-1005'
   assert.match(emitted, /src=wan\ndest=lan\nsrc_dip=203.0.113.1\nsrc_dport=1001\ndest_ip=192.168.1.10\ndest_port=8080/);
   assert.equal((emitted.match(/type=redirect/g) || []).length, 1);
 
+  const rendered = run('shared render: explicit bounds, stable sections, single-rule scope and empty list', `
+json_init() { echo INIT; }
+json_add_array() { echo "$1["; }
+json_close_array() { echo ']'; }
+json_dump() { echo DUMP; }
+jp_forward_busy() { :; }
+jp_forward_emit_cb() {
+ [ "$JP_EMIT_IFACE/$JP_EMIT_PUBLIC/$JP_EMIT_RANGES" = 'wan6mape/203.0.113.1/1000-1005' ] || fail bounds
+ echo "$1"
+ config_load firewall
+}
+jp_forward_render wan6mape 203.0.113.1 '1000-1005'
+jp_forward_render wan6mape 203.0.113.1 '1000-1005' saved
+DB_jp_ipoe_sections=config
+jp_forward_busy() { fail unexpected-inspection; }
+jp_forward_render wan6mape 203.0.113.1 '1000-1005'
+`);
+  assert.equal(rendered, 'INIT\nfirewall[\nsaved\nother\n]\nDUMP\nINIT\nfirewall[\nsaved\n]\nDUMP\nINIT\nfirewall[\n]\nDUMP\n');
+
   const protocol = read('root/usr/share/jp-ipoe/map.sh')
     .replace(/^\. \/usr\/share\/jp-ipoe\/forward\.sh$/m, '')
     .replaceAll('/tmp/map-', tmp + '/map-');
@@ -293,6 +312,19 @@ exit 0
   assert.doesNotMatch(log, /delete jp_ipoe.created/);
   assert.equal((log.match(/snat/g) || []).length, 1);
   assert.doesNotMatch(command, /\b(?:ifdown|ifup)\b|conntrack\s+-(?:D|F)\b/);
+
+  run('release: cleanup failure stops later steps and propagates SNAT failure', `
+for failed in delete commit snat; do
+ steps=''
+ uci() { [ "$1" != -q ] || shift; steps="$steps $1"; [ "$1" != "$failed" ]; }
+ jp_forward_refresh_snat() { steps="$steps snat"; [ "$failed" != snat ]; }
+ jp_forward_release saved && fail unexpected-success
+ case "$failed:$steps" in
+  'delete: delete'|'commit: delete commit'|'snat: delete commit snat') ;;
+  *) fail "unexpected cleanup order $failed:$steps" ;;
+ esac
+done
+`, command);
 
   const setup = stripSources(read('root/usr/sbin/jp-ipoe-setup')).split('# Entry point')[0];
   run('Apply comparisons: changed/absent options are not confused with a saved fingerprint', `
@@ -443,7 +475,15 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   const view = new Function('view', 'ui', 'E', '_', 'fs', 'document', js)(
     { extend: value => value },
     { showModal: (title, nodes) => { modal = nodes; }, hideModal: () => {},
-      addNotification: (title, node) => { notifications++; messages.push(node.children ?? node.attrs); },
+      addNotification: (title, node, style) => {
+        assert(['warning', 'error'].includes(style), 'only warnings/errors stay until dismissed');
+        notifications++; messages.push(node.children ?? node.attrs);
+      },
+      addTimeLimitedNotification: (title, node, timeout, style) => {
+        assert.equal(timeout, 5000);
+        assert.equal(style, 'info');
+        notifications++; messages.push(node.children ?? node.attrs);
+      },
       createHandlerFn: (owner, fn) => (typeof fn === 'string' ? owner[fn] : fn).bind(owner) },
     (tag, attrs, children) => ({ tag, attrs, children }), text => text,
     { exec: (...args) => executeCommand(...args) },

@@ -95,14 +95,6 @@ jp_forward_refresh_snat() {
 	sh /usr/libexec/jp-ipoe-map-nft setup "$MAPE_IFACE" "$JP_LINK" "$JP_PUBLIC" "$JP_RANGES"
 }
 
-jp_forward_render() {
-	json_init
-	json_add_array firewall
-	jp_forward_emit "$MAPE_IFACE" "$JP_PUBLIC" "$JP_RANGES" "$1"
-	json_close_array
-	json_dump
-}
-
 jp_forward_contains() {
 	[ "$(printf '%s' "$1" | jsonfilter -e '@.firewall[0].name' 2>/dev/null)" = "jp_ipoe_$2" ]
 }
@@ -130,6 +122,19 @@ jp_forward_publish() {
 jp_forward_withdraw() {
 	jp_forward_publish "$1" '{"firewall":[]}' && jp_forward_active &&
 		! list_contains JP_ACTIVE "jp_ipoe_$1"
+}
+
+# Only after confirmed DNAT withdrawal: remove saved state, then release SNAT.
+jp_forward_release() {
+	local section="$1"
+	uci -q delete "jp_ipoe.$section" && uci commit jp_ipoe || {
+		jp_forward_error "Runtime forward removed, but saved rule cleanup failed. Retry deletion; it may return on reconnect."
+		return 1
+	}
+	jp_forward_refresh_snat >&2 || {
+		jp_forward_error "Forward removed, but SNAT refresh failed. An extra port reservation may remain; tunnel not restarted."
+		return 1
+	}
 }
 
 jp_forward_add() {
@@ -177,7 +182,7 @@ jp_forward_add() {
 
 	# Reserve atomically on the live link, then recheck for a raced binding.
 	# Existing conntrack mappings survive; neither tunnel nor network restarts.
-	if jp_forward_refresh_snat >&2 && replacement="$(jp_forward_render "$section")" &&
+	if jp_forward_refresh_snat >&2 && replacement="$(jp_forward_render "$MAPE_IFACE" "$JP_PUBLIC" "$JP_RANGES" "$section")" &&
 		jp_forward_contains "$replacement" "$section" &&
 		jp_forward_publish "$section" "$replacement" &&
 		jp_forward_active && list_contains JP_ACTIVE "jp_ipoe_$section"; then
@@ -194,14 +199,7 @@ jp_forward_add() {
 		jp_forward_error "Hot update failed; rollback could not be confirmed. Saved rule/reservation retained; forwarding may remain active. Retry deletion. Tunnel not restarted."
 		return 1
 	}
-	uci -q delete "jp_ipoe.$section" && uci commit jp_ipoe || {
-		jp_forward_error "Runtime forward removed, but saved rule cleanup failed. Retry deletion; it may return on reconnect."
-		return 1
-	}
-	jp_forward_refresh_snat >&2 || {
-		jp_forward_error "Forward removed, but SNAT refresh failed. An extra port reservation may remain; tunnel not restarted."
-		return 1
-	}
+	jp_forward_release "$section" || return 1
 	jp_forward_error "Forward not applied (port became busy, allocation changed, or reload failed). Rule removed; tunnel not restarted."
 }
 
@@ -222,15 +220,7 @@ jp_forward_remove() {
 			jp_forward_error "Removal could not be confirmed. Saved rule/reservation retained; retry deletion. Tunnel not restarted."
 			return 1
 		}
-		# Withdraw DNAT and reload fw4 BEFORE releasing its SNAT reservation.
-		uci delete "jp_ipoe.$section" && uci commit jp_ipoe || {
-			jp_forward_error "Runtime forward removed, but saved rule cleanup failed. Retry deletion; it may return on reconnect."
-			return 1
-		}
-		jp_forward_refresh_snat >&2 || {
-			jp_forward_error "Forward removed, but SNAT refresh failed. An extra port reservation may remain; tunnel not restarted."
-			return 1
-		}
+		jp_forward_release "$section"
 	else
 		# Offline/stale interface: only remove saved state, never start it.
 		uci delete "jp_ipoe.$section" && uci commit jp_ipoe

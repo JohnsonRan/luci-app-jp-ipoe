@@ -395,17 +395,11 @@ msgstr "协议"
 msgid "LAN IPv4 Address"
 msgstr "内网 IPv4 地址"
 
-msgid "Internal Port"
-msgstr "内网端口"
-
 msgid "External Port"
 msgstr "外部端口"
 
 msgid "Check & Add Forward"
 msgstr "检查并添加转发"
-
-msgid "MAP-E is down. Start IPoE before adding a forward."
-msgstr "MAP-E 未连接，请先启动 IPoE 再添加转发。"
 
 msgid "Public Endpoint"
 msgstr "公网地址与端口"
@@ -433,9 +427,6 @@ msgstr "规则将实时更新，不会重启 MAP-E 或清除现有连接。"
 
 msgid "The selected LAN service will be exposed to the Internet. Secure it before continuing. Local checks cannot guarantee future availability."
 msgstr "选定的内网服务将开放到公网，请先确保服务安全。本地检查不能保证端口今后始终可用。"
-
-msgid "Existing sessions may continue after deletion. Only new connections will be blocked."
-msgstr "删除后已有会话可能继续，只有新连接会被阻止。"
 
 msgid "Port forward removed."
 msgstr "端口转发已删除。"
@@ -478,9 +469,6 @@ msgstr "正在加载…"
 
 msgid "Add a forward"
 msgstr "新增转发"
-
-msgid "Leave the external port empty for automatic selection. Make sure the LAN service is reachable first."
-msgstr "外部端口留空即自动选择。请先确认目标服务在内网可达。"
 
 msgid "Existing forwards"
 msgstr "已有转发"

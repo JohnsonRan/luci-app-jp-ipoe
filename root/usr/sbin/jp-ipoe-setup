@@ -1068,11 +1068,7 @@ EOF
 	. /usr/share/libubox/jshn.sh
 	. /usr/share/jp-ipoe/forward.sh
 	status="$(ubus call "network.interface.$MAPE_IFACE" status)" || return 1
-	json_init
-	json_add_array firewall
-	jp_forward_emit "$MAPE_IFACE" "$ip4" "$ports"
-	json_close_array
-	expected="$(json_dump)"
+	expected="$(jp_forward_render "$MAPE_IFACE" "$ip4" "$ports")" || return 1
 	ucode -e '
 		function canonical(v) {
 			if (type(v) == "array") return map(v, canonical);

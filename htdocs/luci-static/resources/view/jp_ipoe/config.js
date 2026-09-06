@@ -41,8 +41,8 @@ return view.extend({
 		return fs.exec('/usr/sbin/jp-ipoe-setup', args).then(function(res) {
 			if (res.code === 0) {
 				var unchanged = args[0] === 'start' && (res.stdout || '').trim() === 'JP_IPOE_UNCHANGED=1';
-				ui.addNotification(null, E('p', unchanged
-					? _('IPoE configuration already matches the running setup. No restart needed.') : okMessage), 'info');
+				ui.addTimeLimitedNotification(null, E('p', unchanged
+					? _('IPoE configuration already matches the running setup. No restart needed.') : okMessage), 5000, 'info');
 			} else
 				ui.addNotification(null, E('pre', {},
 					(failMessage ? failMessage + '\n' : '') + self.formatCommandOutput(res)), 'error');
@@ -160,7 +160,7 @@ return view.extend({
 		var applyIPoE = function(force) {
 			if (force && !window.confirm(_('Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic.')))
 				return;
-			ui.addNotification(null, E('p', _('Checking IPoE configuration. Changes or repairs may take around 30 seconds.')), 'info');
+			ui.addTimeLimitedNotification(null, E('p', _('Checking IPoE configuration. Changes or repairs may take around 30 seconds.')), 5000, 'info');
 			return m.save(null, true).then(function() {
 				return self.runSetupAction([force ? 'repair' : 'start'], _('IPoE configuration applied.'));
 			});
@@ -466,7 +466,7 @@ return view.extend({
 	confirmForward: function(args, rule) {
 		var self = this;
 		if (this.forwardBusy) {
-			ui.addNotification(null, E('p', _('A port-forwarding operation is in progress. Please wait.')), 'info');
+			ui.addTimeLimitedNotification(null, E('p', _('A port-forwarding operation is in progress. Please wait.')), 5000, 'info');
 			return;
 		}
 		var commands = Array.isArray(args[0]) ? args : [args];
@@ -507,7 +507,7 @@ return view.extend({
 										var result = JSON.parse(res.stdout);
 										message = _('Port forward added:') + ' ' + self.forwardEndpoint(result.public_ip, result.external_port);
 									}
-									ui.addNotification(null, E('p', message), 'info');
+									ui.addTimeLimitedNotification(null, E('p', message), 5000, 'info');
 								});
 							});
 						}, Promise.resolve()).catch(function(e) {
@@ -617,7 +617,7 @@ return view.extend({
 
 	detectBR: function() {
 		var self = this;
-		ui.addNotification(null, E('p', _('Detecting BR address via mapcalc...')), 'info');
+		ui.addTimeLimitedNotification(null, E('p', _('Detecting BR address via mapcalc...')), 5000, 'info');
 
 		return fs.exec('/usr/sbin/jp-ipoe-setup', ['detect_br']).then(function(res) {
 			var errMsg = _('Detection failed');

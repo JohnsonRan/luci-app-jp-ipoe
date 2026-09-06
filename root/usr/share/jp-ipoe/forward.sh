@@ -227,12 +227,8 @@ jp_forward_emit() {
 	JP_EMIT_DEST="$(jp_forward_zone lan)" || return 0
 	[ "$JP_EMIT_SRC" != "$JP_EMIT_DEST" ] || return 0
 	config_load jp_ipoe
-	local sections="$CONFIG_SECTIONS" section type found=0
-	for section in $sections; do
-		config_get type "$section" TYPE
-		[ "$type" = forward ] && found=1
-	done
-	[ "$found" = 1 ] || return 0
+	local sections="$(config_foreach echo forward)" section
+	[ -n "$sections" ] || return 0
 	jp_forward_busy "$2" || {
 		logger -t jp-ipoe "Port forwarding suspended: cannot inspect local ports/NAT, or miniupnpd is running."
 		return 0
@@ -241,8 +237,15 @@ jp_forward_emit() {
 	# Stable section list: callbacks load both firewall and jp_ipoe.
 	for section in $sections; do
 		[ -n "$only" ] && [ "$section" != "$only" ] && continue
-		config_get type "$section" TYPE
-		[ "$type" = forward ] && jp_forward_emit_cb "$section"
+		jp_forward_emit_cb "$section"
 	done
 	return 0
+}
+
+jp_forward_render() {
+	json_init
+	json_add_array firewall
+	jp_forward_emit "$@"
+	json_close_array
+	json_dump
 }
