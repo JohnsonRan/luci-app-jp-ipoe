@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file records engineering constraints for coding agents working in this repository. User-facing installation and operation belong in [README.md](README.md); implementation explanations, build commands and tests belong in [docs/development.md](docs/development.md). Do not turn the user guide into a session log or deployment-approval record.
 
 ## What this is
 
@@ -12,16 +12,7 @@ The package layout follows OpenWrt convention: everything under `root/` is copie
 
 There is no standalone package build â€” it compiles inside the OpenWrt SDK. Local regression/syntax checks use `node tests/port-forwarding.cjs`. The `Makefile` is an OpenWrt `luci.mk` package definition; `postinst` runs `jp-ipoe-install-map` to install the patched `map.sh` and retains LuCI cache/rpcd refresh on live upgrades. Keep the `luci.mk` include after custom package hooks: it already calls `BuildPackage` for the application and translations, so do not call `BuildPackage` again. Keep the `# call BuildPackage - OpenWrt buildroot signature` comment: `include/scan.mk` discovers packages by literal text before evaluating includes; without it this package disappears from menuconfig. `LUCI_DESCRIPTION` supplies menuconfig help text.
 
-CI (`.github/workflows/build-packages.yml`) builds against the OpenWrt SDK for 24.10 (ipk) and 25.12 (apk), x86/64 and arm64. To reproduce a build locally you need an OpenWrt SDK checkout, then:
-
-```sh
-# inside an OpenWrt SDK tree, with this repo rsynced to package/luci-app-jp-ipoe
-./scripts/feeds install -p luci luci-base
-./scripts/feeds install -p packages map
-echo "CONFIG_PACKAGE_luci-app-jp-ipoe=m" >> .config
-make defconfig
-make package/luci-app-jp-ipoe/compile V=s
-```
+CI (`.github/workflows/build-packages.yml`) builds against the OpenWrt SDK for 24.10 (ipk) and 25.12 (apk), x86/64 and arm64. SDK prerequisites and the build recipe are in [Build packages](docs/development.md#build-packages).
 
 Bump `PKG_VERSION` / `PKG_RELEASE` in `Makefile` when releasing. Tagging `v*` triggers a GitHub release; `workflow_dispatch` produces a nightly prerelease.
 
@@ -41,7 +32,7 @@ When required, `start` runs the strict pipeline (`cmd_start`): validate config â
 
 Key behaviors that are easy to break:
 - **DUID-LL** (`ensure_wan6_duid_ll`): NTT NGN requires DHCPv6 DUID-LL (`00030001` + WAN MAC). The script only writes an interface-level `clientid` when the effective DUID isn't already correct, and never touches the global default DUID.
-- **PPPoE fallback conflict** (`recover_wan6_after_pppoe_conflict`, `cmd_boot`): on boot, if WAN6 can't get IPv6, the script stops WAN PPPoE interfaces, restarts WAN6, then restarts PPPoE only after IPoE succeeds. PPPoE interfaces also get `metric=200` to deprioritize them. This boot-only recovery is why `boot` is a separate subcommand from `start`.
+- **PPPoE fallback conflict** (`recover_wan6_after_pppoe_conflict`, `cmd_boot`): `boot` first stops managed IPoE and WAN PPPoE interfaces, restarts WAN6, then forces the full startup pipeline. Ordinary full setup can also stop PPPoE and retry WAN6 if initial IPv6 acquisition fails. Stopped PPPoE interfaces are restored only after IPoE succeeds; their `metric=200` lowers route priority. Keep the unconditional boot sequence separate from normal `start`.
 - **`ip6prefix` handling** (`wan6_ip6prefix_required`): `wan6.ip6prefix` is only set when relay mode or manual MAP/BR params are in use; PD-matched lines leave it unset.
 
 The init script `root/etc/init.d/jp_ipoe` (procd, START=95) only runs when `enabled=1`; `boot()` calls `jp-ipoe-setup boot`, while `restart`/`reload` use the plain `start`/`stop` path.
@@ -54,7 +45,7 @@ The patch's purpose: stock OpenWrt only SNATs to the *first* assigned MAP-E port
 
 `root/usr/libexec/jp-ipoe-map-nft` builds a dedicated nftables table (`jpipoe_<cfg>`). `build_ranges` normalizes the assigned port union and splits it around manual/managed reservations. New TCP/UDP mappings and ICMP echo IDs use `numgen inc` + a verdict map to rotate among `pool_*` chains, with native range SNAT choosing a free port inside the selected segment. Do not restore forced single-port preservation: a legal source port can already be occupied. This is deliberately not whole-pool fallback; a full segment can still drop packets while another segment has space, and endpoint-independent mappings across separate connections are not guaranteed. Recreating the table happens in one nft transaction and leaves existing conntrack mappings intact. Keep `check_rules` synchronized with the full generated chain/rule graph. Tables are torn down on `proto_map_teardown`.
 
-Optional root/Linux regressions: `python3 tests/snat-collision.py` exercises real TCP/UDP/ICMP allocation, reservation hot updates and failed transactions in temporary network namespaces; `--scenario time-wait` verifies the real conntrack TIME_WAIT state and pins that isolated entry against sequence-dependent reclamation; `--scenario cross-block` documents the remaining limitation. `python3 tests/snat-checker.py` tests actual nft JSON with native ucode (including its fs module). These supplement, not replace, `node tests/port-forwarding.cjs` and live OpenWrt/NTT acceptance.
+Optional root/Linux regressions and experimental commands are documented under [Tests](docs/development.md#tests). Preserve the fixture boundaries: real TCP/UDP/ICMP allocation and existing-connection checks; TIME_WAIT pinning only in the isolated fixture; cross-block success meaning the limitation was demonstrated, not solved; actual nft JSON checked with native ucode. These supplement, not replace, mocked regressions and live OpenWrt/NTT acceptance. NFQUEUE experiments are not production allocator code.
 
 ### 4. Status/detection helper: `jp-ipoe-info`
 
