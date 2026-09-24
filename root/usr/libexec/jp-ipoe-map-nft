@@ -21,58 +21,72 @@ load_reserved_ports() {
 	return 0
 }
 
-build_portmap() {
-	local portsets="$1"
-	local portset startport endport x
-
-	PORTCOUNT=0
-	PORTMAP=""
-	PORTLIST=""
-
-	for portset in $portsets; do
-		startport="${portset%-*}"
-		endport="${portset#*-}"
-
-		[ -n "$startport" ] || continue
-		[ -n "$endport" ] || endport="$startport"
-
-		for x in $(seq "$startport" "$endport"); do
-			list_contains DONT_SNAT_TO "$x" && continue
-
-			append PORTLIST "$x" ", "
-			append PORTMAP "${PORTCOUNT} : ${x}" ", "
-			PORTCOUNT=$((PORTCOUNT + 1))
-		done
+build_ranges() {
+	local range lo hi
+	# Normalize the union before grouping; reservations split, never bridge, runs.
+	RANGES="$(awk -v ranges="$1" -v reserved="$DONT_SNAT_TO" '
+		BEGIN {
+			n = split(reserved, a, /[ \t\r\n]+/)
+			for (i = 1; i <= n; i++) blocked[a[i]] = 1
+			n = split(ranges, a, /[ \t\r\n]+/)
+			for (i = 1; i <= n; i++) {
+				if (a[i] == "") continue
+				k = split(a[i], b, "-"); hi = k == 1 ? b[1] : b[2]
+				for (p = b[1]; p <= hi; p++) if (!(p in blocked)) allowed[p] = 1
+			}
+			lo = 0
+			for (p = 1; p <= 65536; p++) {
+				if (p in allowed) { if (!lo) lo = p }
+				else if (lo) { print lo "-" p - 1; lo = 0 }
+			}
+		}')" || return 1
+	RANGECOUNT=0
+	RANGELIST=""
+	RANGEMAP=""
+	for range in $RANGES; do
+		lo="${range%-*}"; hi="${range#*-}"
+		append RANGELIST "[$lo,$hi]" ","
+		append RANGEMAP "$RANGECOUNT : jump pool_$RANGECOUNT" ", "
+		RANGECOUNT=$((RANGECOUNT + 1))
 	done
-
-	[ "$PORTCOUNT" -gt 0 ]
+	[ "$RANGECOUNT" -gt 0 ]
 }
 
 apply_rules() {
-	local cfg="$1"
-	local link="$2"
-	local snat_ip="$3"
-	local portsets="$4"
-	local nft_table
+	local cfg="$1" link="$2" snat_ip="$3" portsets="$4"
+	local nft_table range port index proto
 
 	load_reserved_ports "$cfg" "$snat_ip" || return 1
 	jp_forward_select "$portsets" "$DONT_SNAT_TO" "" >/dev/null || return 1
-	build_portmap "$portsets" || return 1
-
+	build_ranges "$portsets" || return 1
 	nft_table="$(table_name "$cfg")"
 
 	{
-		# One nft transaction: never expose a gap with unreserved SNAT ports.
+		# A single transaction, including deletion: no unreserved/empty live gap.
+		# Recreate rather than flush, so removed pool chains cannot accumulate.
 		printf 'add table inet %s\n' "$nft_table"
-		printf 'flush table inet %s\n' "$nft_table"
+		printf 'delete table inet %s\n' "$nft_table"
+		printf 'add table inet %s\n' "$nft_table"
+		index=0
+		for range in $RANGES; do
+			port="$range"
+			[ "${range%-*}" != "${range#*-}" ] || port="${range%-*}"
+			printf 'add chain inet %s pool_%s\n' "$nft_table" "$index"
+			for proto in tcp udp icmp; do
+				printf 'add rule inet %s pool_%s ip protocol %s snat ip to %s : %s\n' "$nft_table" "$index" "$proto" "$snat_ip" "$port"
+			done
+			index=$((index + 1))
+		done
 		printf 'add chain inet %s srcnat { type nat hook postrouting priority 0; policy accept; }\n' "$nft_table"
-		printf 'add rule inet %s srcnat ip protocol icmp icmp type echo-request oifname "%s" icmp id { %s } snat ip to %s\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
-		printf 'add rule inet %s srcnat ip protocol icmp icmp type echo-request oifname "%s" icmp id != { %s } snat ip to %s : jhash ip saddr . meta l4proto . icmp id mod %s map { %s }\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
+		# NAT itself preserves a source port when possible, but can choose another
+		# inside the selected run. Do not force a legal-but-already-occupied port.
+		# ponytail: a full run can still drop despite space elsewhere; later
+		# allocations rotate runs. This is not an atomic whole-pool search.
+		for proto in tcp udp; do
+			printf 'add rule inet %s srcnat ip protocol %s oifname "%s" numgen inc mod %s vmap { %s }\n' "$nft_table" "$proto" "$link" "$RANGECOUNT" "$RANGEMAP"
+		done
+		printf 'add rule inet %s srcnat ip protocol icmp icmp type echo-request oifname "%s" numgen inc mod %s vmap { %s }\n' "$nft_table" "$link" "$RANGECOUNT" "$RANGEMAP"
 		printf 'add rule inet %s srcnat ip protocol icmp icmp type != echo-request oifname "%s" snat ip to %s\n' "$nft_table" "$link" "$snat_ip"
-		printf 'add rule inet %s srcnat ip protocol tcp oifname "%s" tcp sport { %s } snat ip to %s : tcp sport\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
-		printf 'add rule inet %s srcnat ip protocol udp oifname "%s" udp sport { %s } snat ip to %s : udp sport\n' "$nft_table" "$link" "$PORTLIST" "$snat_ip"
-		printf 'add rule inet %s srcnat ip protocol tcp oifname "%s" snat ip to %s : jhash ip saddr . meta l4proto . th sport mod %s map { %s }\n' "$nft_table" "$link" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
-		printf 'add rule inet %s srcnat ip protocol udp oifname "%s" snat ip to %s : jhash ip saddr . meta l4proto . th sport mod %s map { %s }\n' "$nft_table" "$link" "$snat_ip" "$PORTCOUNT" "$PORTMAP"
 	} | nft -f -
 }
 
@@ -82,43 +96,52 @@ check_rules() {
 	local cfg="$1" link="$2" snat_ip="$3" portsets="$4"
 	load_reserved_ports "$cfg" "$snat_ip" || return 1
 	jp_forward_select "$portsets" "$DONT_SNAT_TO" "" >/dev/null || return 1
-	build_portmap "$portsets" || return 1
+	build_ranges "$portsets" || return 1
 	nft -j list table inet "$(table_name "$cfg")" | ucode -e '
 		let state = json(require("fs").stdin.read("all"));
-		let ports = json(ARGV[0]), link = ARGV[1], ip = ARGV[2];
-		let chains = filter(state.nftables, e => e.chain);
+		let ranges = json(ARGV[0]), link = ARGV[1], ip = ARGV[2];
+		let chains = map(filter(state.nftables, e => e.chain), e => e.chain);
 		let rules = map(filter(state.nftables, e => e.rule), e => e.rule);
-		if (length(chains) != 1 || chains[0].chain.name != "srcnat" ||
-			chains[0].chain.type != "nat" || chains[0].chain.hook != "postrouting" ||
-			chains[0].chain.prio != 0 || chains[0].chain.policy != "accept" || length(rules) != 7) exit(1);
-		let hashes = 0, sets = 0, preserved = 0;
-		for (let r in rules) {
-			let nats = filter(r.expr, e => e.snat);
-			let devices = filter(r.expr, e => e.match?.left?.meta?.key == "oifname");
-			if (r.chain != "srcnat" || length(nats) != 1 || nats[0].snat.addr != ip ||
-				length(devices) != 1 || devices[0].match.right != link || !(devices[0].match.op in ["==", "in"])) exit(1);
-			let port = nats[0].snat.port;
-			if (port?.map) {
-				let pairs = port.map.data?.set;
-				if (port.map.key?.jhash?.mod != length(ports) || type(pairs) != "array" || length(pairs) != length(ports)) exit(1);
-				sort(pairs, (a, b) => a[0] - b[0]);
-				for (let i = 0; i < length(ports); i++)
-					if (pairs[i][0] != i || pairs[i][1] != ports[i]) exit(1);
-				hashes++;
-			} else if (port?.payload?.field == "sport") {
-				preserved++;
-			} else if (port != null) exit(1);
-			for (let e in r.expr) {
-				let m = e.match;
-				if (!(m?.left?.payload?.field in ["id", "sport"])) continue;
-				if (m.left.payload.field == "sport" && !(m.op in ["==", "in"])) exit(1);
-				let values = type(m.right) == "int" ? [m.right] : m.right?.set;
-				if (type(values) != "array" || sprintf("%J", sort(values, (a, b) => a - b)) != sprintf("%J", ports)) exit(1);
-				sets++;
-			}
+		function same(a, b) {
+			if (type(a) != type(b)) return false;
+			if (type(b) == "array") {
+				if (length(a) != length(b)) return false;
+				for (let i = 0; i < length(b); i++) if (!same(a[i], b[i])) return false;
+			} else if (type(b) == "object") {
+				if (length(a) != length(b)) return false;
+				for (let k in b) if (!same(a[k], b[k])) return false;
+			} else return a == b;
+			return true;
 		}
-		exit(hashes == 3 && sets == 4 && preserved == 2 ? 0 : 1);
-	' "[$PORTLIST]" "$link" "$snat_ip"
+		function payload(proto, field, value, op) {
+			return { match: { op: op || "==", left: { payload: { protocol: proto, field } }, right: value } };
+		}
+		function chain(name, expected, base) {
+			let c = filter(chains, e => e.name == name);
+			let r = filter(rules, e => e.chain == name);
+			if (length(c) != 1 || length(r) != length(expected)) exit(1);
+			if (base) {
+				if (c[0].type != "nat" || c[0].hook != "postrouting" || c[0].prio != 0 || c[0].policy != "accept") exit(1);
+			} else if (c[0].type != null || c[0].hook != null) exit(1);
+			for (let i = 0; i < length(r); i++) if (!same(r[i].expr, expected[i])) exit(1);
+		}
+		if (length(chains) != length(ranges) + 1 || length(rules) != length(ranges) * 3 + 4) exit(1);
+		let pairs = [];
+		for (let i = 0; i < length(ranges); i++) {
+			let port = ranges[i][0] == ranges[i][1] ? ranges[i][0] : { range: ranges[i] };
+			chain("pool_" + i, map(["tcp", "udp", "icmp"], proto => [
+				payload("ip", "protocol", proto), { snat: { family: "ip", addr: ip, port } }
+			]), false);
+			push(pairs, [i, { jump: { target: "pool_" + i } }]);
+		}
+		let device = { match: { op: "==", left: { meta: { key: "oifname" } }, right: link } };
+		let dispatch = { vmap: { key: { numgen: { mode: "inc", mod: length(ranges), offset: 0 } }, data: { set: pairs } } };
+		let expected = map(["tcp", "udp"], proto => [payload("ip", "protocol", proto), device, dispatch]);
+		push(expected, [payload("ip", "protocol", "icmp"), payload("icmp", "type", "echo-request"), device, dispatch]);
+		push(expected, [payload("ip", "protocol", "icmp"), payload("icmp", "type", "echo-request", "!="), device, { snat: { family: "ip", addr: ip } }]);
+		chain("srcnat", expected, true);
+		exit(0);
+	' "[$RANGELIST]" "$link" "$snat_ip"
 }
 
 teardown_rules() {

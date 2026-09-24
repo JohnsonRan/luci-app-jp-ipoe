@@ -216,17 +216,33 @@ proto_map_setup wan6mape wan6mape
   assert(integration.indexOf('type=redirect') < integration.indexOf('PUBLISHED'));
   assert.match(integration, /ERROR=INVALID_PORTSETS/);
   assert.equal((integration.match(/PUBLISHED/g) || []).length, 1);
-  assert.match(fs.readFileSync(tmp + '/protocol-nft', 'utf8'), /0 : 1002/);
+  assert.match(fs.readFileSync(tmp + '/protocol-nft', 'utf8'), /snat ip to 203\.0\.113\.1 : 1002-1005/);
 
   const batch = run('SNAT excludes manual and managed ports, keeps all other ranges, atomic replace', `
 nft() { [ "$1" = '-f' ] || fail "non-atomic $*"; cat; }
 apply_rules wan6mape map-wan6mape 203.0.113.1 '1000-1003 2000-2001' || fail apply
 `, nft);
-  assert.match(batch, /add table inet jpipoe_wan6mape\nflush table inet jpipoe_wan6mape/);
-  assert.match(batch, /mod 4 map \{ 0 : 1002, 1 : 1003, 2 : 2000, 3 : 2001 \}/);
-  assert.doesNotMatch(batch, / : 100[01](?:,| )/);
+  assert.match(batch, /add table inet jpipoe_wan6mape\ndelete table inet jpipoe_wan6mape\nadd table inet jpipoe_wan6mape/);
+  assert.match(batch, /numgen inc mod 2 vmap \{ 0 : jump pool_0, 1 : jump pool_1 \}/);
+  assert.equal((batch.match(/snat ip to 203\.0\.113\.1 : 1002-1003/g) || []).length, 3);
+  assert.equal((batch.match(/snat ip to 203\.0\.113\.1 : 2000-2001/g) || []).length, 3);
+  assert.doesNotMatch(batch, / : 100[01](?:,| |\n)/);
+  assert.doesNotMatch(batch, /jhash|snat ip to [^\n]+ : (?:tcp|udp) sport/);
 
-  run('SNAT exhaustion and nft failure propagate without delete-first', `
+  run('SNAT grouping splits reservations, normalizes overlaps, handles singleton and bounds', `
+DONT_SNAT_TO='1001 1003'
+build_ranges '2000 1000-1005 1004-1005' || fail group
+[ "$RANGELIST" = '[1000,1000],[1002,1002],[1004,1005],[2000,2000]' ] || fail "$RANGELIST"
+[ "$RANGECOUNT" = 4 ] || fail count
+DONT_SNAT_TO=''
+build_ranges '65534-65535 1 2' || fail bounds
+[ "$RANGELIST" = '[1,2],[65534,65535]' ] || fail "$RANGELIST"
+DONT_SNAT_TO='1 2'
+build_ranges '1-2' && fail empty
+exit 0
+`, nft);
+
+  run('SNAT exhaustion and nft failure propagate without a separate delete command', `
 nft() { [ "$1" = '-f' ] || fail non-atomic; cat >/dev/null; return 1; }
 apply_rules wan6mape map-wan6mape 203.0.113.1 '1000-1001' && fail empty
 apply_rules wan6mape map-wan6mape 203.0.113.1 '1000-1003' && fail nft-error

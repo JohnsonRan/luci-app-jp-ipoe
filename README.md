@@ -19,6 +19,20 @@ ISPs with NTT mostly support both IPv4 & IPv6 implementations, while former one 
 - lower PPPoE fallback priority by setting PPPoE metrics to `200`
 - show status and attempt BR address detection from LuCI
 
+### Outbound port allocation
+
+New TCP/UDP mappings and ICMP echo IDs rotate among the legal contiguous port
+segments using native nftables `numgen` / verdict maps. The kernel can choose an
+unused port **within the selected segment**, rather than being forced to one
+hash-selected port. Manual and managed forwarding reservations split segments;
+atomic rule replacement preserves existing conntrack mappings.
+
+This is not a whole-pool allocator: a full segment can still cause packet loss
+while another segment has space. Later allocations rotate segments, but neither
+immediate cross-segment fallback nor zero loss is guaranteed. Separate connections
+from one local source port need not retain the same external port across different
+destinations; endpoint-independent mappings are not guaranteed.
+
 ## Requirements
 
 - OpenWrt 22.03 or newer with fw4/nftables
@@ -296,9 +310,26 @@ Local regression checks (Node.js + POSIX sh/awk, no npm dependencies):
 node tests/port-forwarding.cjs
 ```
 
-These checks mock OpenWrt services. Real netifd/fw4 operation, nft kernel rule
-acceptance, uninterrupted existing traffic during hot updates, reconnect behavior
-and packet forwarding still require a router test. No zero-packet-loss claim is made.
+These checks mock OpenWrt services. Optional real-kernel checks use temporary
+Linux network namespaces (root, `ip`, `nft`, Python 3; the checker also needs
+`ucode` with its `fs` module):
+
+```sh
+sudo python3 tests/snat-collision.py                      # TCP/UDP/ICMP, reservations, hot updates
+sudo python3 tests/snat-collision.py --scenario time-wait # confirmed conntrack TIME_WAIT collision
+sudo python3 tests/snat-collision.py --scenario cross-block # demonstrate the known limitation
+sudo python3 tests/snat-checker.py                       # actual nft JSON, valid and corrupted states
+```
+
+`--helper /path/to/old/helper` runs the same collision fixture against an older
+allocator; the old fixed-port implementation fails the within-block/TIME_WAIT
+checks. The TIME_WAIT fixture confirms the real TCP state, then pins only that
+isolated entry with a fixed timeout to prevent sequence-dependent reclamation.
+These tests do not contact external hosts or alter the host firewall.
+They cover native NAT allocation and existing-connection preservation, not live
+MAP-E encapsulation or NTT reachability. Real netifd/fw4 operation, reconnects and
+end-to-end forwarding still require a separately authorized router test.
+No zero-packet-loss claim is made.
 The new MAC/native-IPv6/dual-stack changes have not been deployed or accepted on a
 router. Acceptance requires separate authorization to deploy the backend and open
 one specified IPv6 service, test external access, delete the rule and check its
