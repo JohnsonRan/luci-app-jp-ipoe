@@ -27,10 +27,10 @@ worker_errors, decisions = [], []
 def q_attr(kind, payload):
     size = len(payload) + 4
     return struct.pack('=HH', size, kind) + payload + b'\0' * ((-size) % 4)
-def q_message(kind, flags, payload):
-    body = struct.pack('!BBH', socket.AF_INET, 0, 123) + payload
+def q_message(kind, flags, payload, queue=123):
+    body = struct.pack('!BBH', socket.AF_INET, 0, queue) + payload
     return struct.pack('=IHHII', 16+len(body), kind, flags, 1, 0) + body
-def q_open(maxlen=128, fail_open=False):
+def q_open(maxlen=128, fail_open=False, conntrack=False, queue=123):
     nl = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, 12)
     try:
         nl.settimeout(3)
@@ -39,9 +39,9 @@ def q_open(maxlen=128, fail_open=False):
         config = q_attr(1, struct.pack('!BBH', 1, 0, socket.AF_INET))
         config += q_attr(2, struct.pack('!IB', 128, 2))
         config += q_attr(3, struct.pack('!I', maxlen))
-        config += q_attr(4, struct.pack('!I', 1))
-        config += q_attr(5, struct.pack('!I', int(fail_open)))
-        nl.sendto(q_message(0x302, 5, config), (0, 0))
+        config += q_attr(4, struct.pack('!I', 1 | (2 if conntrack else 0)))
+        config += q_attr(5, struct.pack('!I', int(fail_open) | (2 if conntrack else 0)))
+        nl.sendto(q_message(0x302, 5, config, queue), (0, 0))
         ack = nl.recv(65536)
         if len(ack) < 20 or struct.unpack_from('=H', ack, 4)[0] != 2:
             raise RuntimeError('missing queue configuration ACK')
@@ -52,7 +52,7 @@ def q_open(maxlen=128, fail_open=False):
         nl.close()
         raise
 
-def q_receive(nl):
+def q_receive(nl, details=False):
     data = nl.recv(65536)
     if len(data) < 20 or struct.unpack_from('=H', data, 4)[0] != 0x300:
         raise RuntimeError('expected queued packet')
@@ -64,10 +64,11 @@ def q_receive(nl):
         if size < 4 or pos + size > total: raise RuntimeError('invalid queue attribute')
         a[kind & 0x3fff] = data[pos+4:pos+size]
         pos += (size+3) & ~3
-    return struct.unpack_from('!I', a[1])[0], a[10]
+    packet_id = struct.unpack_from('!I', a[1])[0]
+    return (packet_id, a) if details else (packet_id, a[10])
 
-def q_verdict(nl, packet_id, verdict):
-    nl.sendto(q_message(0x301, 1, q_attr(2, struct.pack('!II', verdict, packet_id))), (0, 0))
+def q_verdict(nl, packet_id, verdict, queue=123):
+    nl.sendto(q_message(0x301, 1, q_attr(2, struct.pack('!II', verdict, packet_id)), queue), (0, 0))
 
 def queue_worker():
     try:

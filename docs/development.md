@@ -311,6 +311,66 @@ hot-update guarantee. Fallback still has the selected-segment capacity limit.
 These experiments are not a reason to add a production daemon without a
 separate design, demonstrated need and validation.
 
+### Isolated real-occupancy TCP allocator prototype
+
+[`snat-queue-allocator.py`](../tests/experiments/snat-queue-allocator.py) and
+[`snat_queue_allocator.py`](../tests/experiments/snat_queue_allocator.py) extend
+the experiment to discover candidate ports from real conntrack state. They are
+**test-host code, not an installed service or a production allocator**. In
+addition to the Linux prerequisites above, they require NFQUEUE support and a
+loadable `libnftables` shared library with Python `ctypes`. Neither `perf` nor
+`bpftool` is required. Do not run these tests on the production router.
+
+```sh
+uv run --no-project --offline --python /usr/bin/python3 tests/experiments/snat-queue-allocator.py
+# Run a bounded case separately; "collisions" groups the three collision cases.
+uv run --no-project --offline --python /usr/bin/python3 tests/experiments/snat-queue-allocator.py --case cross-block
+```
+
+Cases are `within-block`, `cross-block`, `time-wait`, `pending`, `safety` and
+`perf`; the default `all` runs every case. The prototype handles **TCP/IPv4,
+conntrack zone zero only**:
+
+- A single selector queries exact reply tuples, including TIME_WAIT. Only an
+  `ENOENT` response establishes observed availability; inspection failures do
+  not mean a free port. The selector is not told which fixture port is free.
+- A persistent libnftables context publishes short-lived, original-tuple-keyed
+  selections without a per-connection `nft` process. Native NAT still creates
+  and confirms the mapping. The legal pool excludes configured reservations.
+- Pending leases prevent the selector from reusing a candidate before it can
+  confirm that flow's mapping. `pending` holds real packets after SNAT but
+  before conntrack confirmation and wraps the selector's cursor. Unknown
+  confirmation conservatively retains the lease; lifecycle reconciliation is
+  intentionally incomplete.
+- `safety` checks eight concurrent connections and a coordinated reservation
+  update: stop the selector, atomically replace the rules, then start with the
+  new pool snapshot. Existing mappings survive; in-flight updates are not
+  promised lossless. This does not implement forwarding-service publication.
+- An external heartbeat supervisor kills a stuck consumer. Queue bypass and
+  fail-open overflow then use native segmented NAT. Killing a consumer can
+  **drop its held SYN**; the test demonstrates TCP retransmission recovery,
+  not zero-loss switching. There is no automatic restart or guarantee if the
+  supervisor itself fails.
+
+Queries are snapshots, not atomic reservations against native bypass or custom
+rules. Selection has a 64-candidate limit and a 20 ms query/selection budget;
+libnftables execution is not covered by a hard 20 ms deadline. Unknown leases
+are capped at 4096 and can force fallback until restart. The supervisor's
+250 ms heartbeat limit is not a per-packet deadline. Native fallback retains
+the selected-segment limit; **success whenever any pool port is free is not
+promised**. No UDP/ICMP allocator, live MAP-E integration, target-kernel runtime
+acceptance or high-load guarantee is provided.
+
+`cross-block` must reach the other segment within 350 ms rather than count a
+normal TCP retransmission as successful selection. `perf` uses a larger
+63-segment/1006-port pool and three alternating native/allocator pairs, each
+with five warmups and 80 timed connections. It reports socket setup through
+connection and first application response, including responder scheduling,
+not pure kernel latency or throughput. Small collision-case timings and large
+normal-load timings are different workloads; report them separately. Passing
+these tests is not evidence that replacing the production native path improves
+ordinary traffic or fixes Internet ping loss.
+
 ## Validation scope
 
 Mock tests cover control flow and generated data. Namespace tests cover native
