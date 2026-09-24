@@ -515,8 +515,8 @@ msgstr "服务端口"
 msgid "IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes."
 msgstr "IPv6 放行规则独立持久保存，停止或卸载本插件也不会撤销。请在此处或防火墙通信规则中单独删除；IPv6 地址变化后需重新创建。"
 
-msgid "IPv4 checks port allocation and local NAT conflicts. IPv6 checks the LAN route and duplicate managed rules, not service availability or other firewall policies."
-msgstr "IPv4 检查端口分配与本地 NAT 冲突。IPv6 仅检查 LAN 路由和本插件规则重复，不检测服务可用性或其他防火墙策略。"
+msgid "Both IP versions check the current LAN route. IPv4 also checks port allocation and local NAT conflicts; IPv6 checks duplicate managed rules. Neither verifies service availability or every firewall policy."
+msgstr "IPv4 和 IPv6 均检查当前 LAN 路由。IPv4 还检查端口分配与本地 NAT 冲突，IPv6 还检查本插件规则重复；两者均不验证服务可用性或所有防火墙策略。"
 
 msgid "Unable to load devices. Enter addresses manually."
 msgstr "无法加载设备列表，请手动输入地址。"
@@ -541,3 +541,21 @@ msgstr "双栈会分别创建两条独立规则。如其中一条失败，已成
 
 msgid "Partial completion is possible. Review existing rules before retrying."
 msgstr "操作可能仅部分完成，请先检查已有规则再重试。"
+
+msgid "Unavailable"
+msgstr "无法读取"
+
+msgid "System conntrack entries / limit"
+msgstr "系统连接跟踪条目 / 上限"
+
+msgid "Conntrack insert failures (total)"
+msgstr "连接跟踪插入失败数（累计）"
+
+msgid "Conntrack drops (total)"
+msgstr "连接跟踪丢弃数（累计）"
+
+msgid "Conntrack early evictions (total)"
+msgstr "连接跟踪提前回收数（累计）"
+
+msgid "Conntrack statistics cover the whole router, not just MAP-E. Failure and eviction counters are cumulative, not measurements of MAP-E port exhaustion or Internet packet loss. Unavailable means the kernel state could not be read."
+msgstr "连接跟踪统计覆盖整个路由器，并非仅针对 MAP-E。失败和回收计数为累计值，不代表 MAP-E 端口耗尽或互联网丢包情况。“无法读取”表示未能读取内核运行状态。"

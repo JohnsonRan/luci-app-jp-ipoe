@@ -13,6 +13,8 @@ const library = stripSources(read('root/usr/share/jp-ipoe/config.sh')) + '\n' +
 const command = stripSources(read('root/usr/libexec/jp-ipoe-forward')).split('\njp_ipoe_config_load\ncase ')[0]
   .replaceAll('/proc/sys/kernel/random/uuid', tmp + '/uuid');
 const nft = stripSources(read('root/usr/libexec/jp-ipoe-map-nft')).split('\ncase "$1" in')[0];
+const info = stripSources(read('root/usr/libexec/jp-ipoe-info')).split('\ncase "$1" in')[0]
+  .replaceAll('/proc/sys/net/netfilter/', tmp + '/netfilter/');
 let count = 0;
 
 // config_load deliberately replaces current sections, as on OpenWrt. This
@@ -28,6 +30,8 @@ config_foreach() { local cb="$1" type="$2" section kind sections="$CONFIG_SECTIO
  for section in $sections; do config_get kind "$section" TYPE ''; if [ "$kind" = "$type" ]; then "$cb" "$section" "$@"; fi; done; return 0; }
 network_get_subnet() { export "$1=192.168.1.1/24"; }
 network_get_ipaddr() { export "$1=192.168.1.1"; }
+network_get_device() { [ "$2" = lan ] || return 1; export "$1=br-lan"; }
+ip() { [ "$1 $2 $3" = '-4 route get' ] || fail "unexpected ip $*"; printf '%s dev br-lan src 192.168.1.1\\n' "$4"; }
 network_flush_cache() { :; }
 network_is_up() { return 0; }
 logger() { :; }
@@ -83,6 +87,9 @@ async function main() {
 try {
   fs.writeFileSync(tmp + '/uuid', '00000000-0000-0000-0000-000000000001\n');
   fs.mkdirSync(tmp + '/proc');
+  fs.mkdirSync(tmp + '/netfilter');
+  fs.writeFileSync(tmp + '/netfilter/nf_conntrack_count', '0\n');
+  fs.writeFileSync(tmp + '/netfilter/nf_conntrack_max', '30720\n');
   for (const p of ['tcp', 'tcp6', 'udp', 'udp6']) fs.writeFileSync(tmp + '/proc/' + p,
     'sl local_address rem_address st\n' + (p === 'tcp6' ? '0: 00000000000000000000000000000000:1F90 0:0000 0A\n' : ''));
 
@@ -108,6 +115,78 @@ jp_forward_lan_valid 192.168.1.10 || fail lan
 for ip in 192.168.2.10 192.168.1.0 192.168.1.255 192.168.1.1; do jp_forward_lan_valid "$ip" && fail "$ip"; done
 exit 0
 `);
+
+  run('IPv4 FIB: direct LAN only; reject gateways, local/foreign/unknown routes and failed inspection', `
+ip() { printf '%s\\n' "$ROUTE"; }
+ROUTE='192.168.1.10 dev br-lan src 192.168.1.1 uid 0'
+jp_forward_lan_valid 192.168.1.10 || fail direct
+for ROUTE in '' 'local 192.168.1.10 dev lo' 'broadcast 192.168.1.10 dev br-lan' \
+ '192.168.1.10 dev eth0' '192.168.1.10 via 192.168.1.2 dev br-lan' \
+ '192.168.1.10 dev br-lan via 192.168.1.2' 'unreachable 192.168.1.10' \
+ '192.168.1.11 dev br-lan' '192.168.1.10 src 192.168.1.1'; do
+ jp_forward_lan_valid 192.168.1.10 && fail "unsafe route $ROUTE"
+done
+ip() { return 1; }
+jp_forward_lan_valid 192.168.1.10 && fail failed-query
+network_get_device() { return 1; }
+ip() { fail should-not-query; }
+jp_forward_lan_valid 192.168.1.10 && fail missing-device
+exit 0
+`);
+
+  const stats = run('conntrack diagnostics: complete per-CPU sums preserve zero and large counters', `
+conntrack() { [ "$*" = -S ] || fail mutation; printf '%s\\n' \
+ 'cpu=0 insert_failed=3000000000 drop=2 early_drop=0 found=8' \
+ 'cpu=1 early_drop=0 drop=3 insert_failed=4000000000'; }
+jp_ipoe_info_conntrack
+`, info);
+  assert.match(stats, /^count=0$/m);
+  assert.match(stats, /^max=30720$/m);
+  assert.match(stats, /^insert_failed=7000000000$/m);
+  assert.match(stats, /^drop=5$/m);
+  assert.match(stats, /^early_drop=0$/m);
+
+  run('conntrack diagnostics: empty, partial, malformed and failed dumps remain unavailable', `
+conntrack() { printf '%s\\n' "$STATS"; }
+for STATS in '' 'error reading stats' 'cpu=0 insert_failed=0 drop=0' \
+ 'cpu=0 insert_failed=-1 drop=0 early_drop=0' 'cpu=0 insert_failed=1.5 drop=0 early_drop=0' \
+ 'cpu=0 insert_failed=bad drop=0 early_drop=0' 'cpu=0 insert_failed=0 drop=0 early_drop=0 drop=1' \
+ 'cpu=0 insert_failed=0 drop=0 early_drop=0
+cpu=0 insert_failed=0 drop=0 early_drop=0' \
+ 'cpu=0 insert_failed=0 drop=0 early_drop=0
+cpu=1 drop=0 early_drop=0'; do
+ output="$(jp_ipoe_info_conntrack)" || fail unavailable-broke-status
+ for key in insert_failed drop early_drop; do
+  printf '%s\\n' "$output" | grep -q "^$key=$" || fail "guessed $key from $STATS"
+ done
+done
+for rc in 1 127; do
+ conntrack() { echo 'cpu=0 insert_failed=0 drop=0 early_drop=0'; return "$rc"; }
+ output="$(jp_ipoe_info_conntrack)" || fail command-failure
+ printf '%s\\n' "$output" | grep -q '^insert_failed=$' || fail partial-command-output
+done
+`, info);
+
+  run('conntrack diagnostics: missing or malformed sysctls do not become zero', `
+conntrack() { return 1; }
+printf 'invalid\\n' > "$TEST_TMP/netfilter/nf_conntrack_count"
+rm "$TEST_TMP/netfilter/nf_conntrack_max"
+output="$(jp_ipoe_info_conntrack)" || fail unavailable-broke-status
+printf '%s\\n' "$output" | grep -q '^count=$' || fail malformed-count
+printf '%s\\n' "$output" | grep -q '^max=$' || fail absent-limit
+printf '0\\n' > "$TEST_TMP/netfilter/nf_conntrack_count"
+printf '30720\\n' > "$TEST_TMP/netfilter/nf_conntrack_max"
+`, info);
+
+  const partialStatus = run('status remains readable when optional conntrack inspection fails', `
+network_get_subnet6() { export "$1=2001:db8::/64"; }
+uci() { return 1; }
+conntrack() { return 1; }
+jp_ipoe_info_status wan6 wan6mape 2001:db8::1
+`, info);
+  assert.match(partialStatus, /^mape_state=up$/m);
+  assert.match(partialStatus, /^wan6_ipv6=2001:db8::\/64$/m);
+  assert.match(partialStatus, /^insert_failed=$/m);
 
   run('reservation union preserves manual ports and interface scope', `
 jp_forward_reserved wan6mape
@@ -163,7 +242,11 @@ echo WRONG_IP
 jp_forward_emit wan6mape 203.0.113.2 '1000-1005'
 echo WRONG_PORT
 jp_forward_emit wan6mape 203.0.113.1 '2000-2005'
+echo WRONG_ROUTE
+ip() { echo '192.168.1.10 dev eth0'; }
+jp_forward_emit wan6mape 203.0.113.1 '1000-1005'
 echo BUSY
+ip() { printf '%s dev br-lan\\n' "$4"; }
 jp_forward_busy() { JP_FORWARD_BUSY='tcp 1001'; }
 jp_forward_emit wan6mape 203.0.113.1 '1000-1005'
 echo UNAVAILABLE
@@ -290,6 +373,9 @@ exit 0
   run('add: pending changes, last SNAT port, invalid destination rejected before mutation', `
 jp_forward_add icmp 192.168.1.10 80 '' && fail proto
 jp_forward_add tcp 192.168.2.10 80 '' && fail address
+ip() { echo '192.168.1.10 via 192.168.1.2 dev br-lan'; }
+jp_forward_add tcp 192.168.1.10 80 '' && fail indirect-route
+ip() { printf '%s dev br-lan\\n' "$4"; }
 jp_forward_add tcp 192.168.1.10 80 '1000;id' && fail injection
 jp_forward_runtime() { JP_PUBLIC=203.0.113.1; JP_RANGES='1000-1002'; }
 jp_forward_add tcp 192.168.1.10 80 1002 && fail last-port
@@ -375,6 +461,18 @@ exit 0
   assert.equal((log.match(/COMMIT/g) || []).length, 3);
   assert.equal((log.match(/STOP/g) || []).length, 1);
   assert.match(setup, /restart_wan6_interface "\$WAN6_IFACE" \|\| true\s+cmd_start force/);
+
+  const locked = run('locked operations attempt PPPoE restoration after both success and failure', `
+LOCK_DIR="$TEST_TMP/setup-lock"
+restore_stopped_pppoe_fallback() { echo RESTORE; }
+operation() { return "$1"; }
+for expected in 0 1; do
+ run_locked operation "$expected"; actual=$?
+ [ "$actual" = "$expected" ] || fail changed-result
+ rm -rf "$LOCK_DIR"
+done
+`, setup);
+  assert.equal((locked.match(/RESTORE/g) || []).length, 2);
 
   run('IPv6 destinations: canonical LAN GUA only; reject local, WAN, via and invalid input', `
 network_get_device() { export "$1=br-lan"; }
@@ -466,7 +564,7 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
 `, command);
 
   for (const p of ['root/usr/share/jp-ipoe/forward.sh', 'root/usr/share/jp-ipoe/config.sh',
-    'root/usr/libexec/jp-ipoe-forward', 'root/usr/libexec/jp-ipoe-map-nft',
+    'root/usr/libexec/jp-ipoe-forward', 'root/usr/libexec/jp-ipoe-map-nft', 'root/usr/libexec/jp-ipoe-info',
     'root/usr/share/jp-ipoe/map.sh', 'root/usr/sbin/jp-ipoe-setup']) {
     const r = cp.spawnSync('sh', ['-n', p], { cwd: root, encoding: 'utf8' });
     assert.equal(r.status, 0, p + '\n' + r.stderr);
@@ -563,6 +661,44 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
     if (failAt) assert(messages.some(message => /Partial completion is possible/.test(message)));
   }
   console.log('PASS device selection, IPv6 address filtering, family controls and dual-stack partial failures');
+
+  const fields = view.statusFields();
+  for (const field of fields) elements[field.id] = { textContent: '', style: {} };
+  let statusCalls = 0;
+  let statusReply = { code: 0, stdout: JSON.stringify({ mape_state: 'up', conntrack: {
+    count: '0', max: '30720', insert_failed: '7000000000', drop: '0', early_drop: '0'
+  } }) };
+  executeCommand = (file, args) => {
+    assert.equal(file, '/usr/sbin/jp-ipoe-setup');
+    assert.deepEqual(args, ['status']);
+    statusCalls++;
+    return statusReply instanceof Error ? Promise.reject(statusReply) : Promise.resolve(statusReply);
+  };
+  view.activeTab = 'config';
+  await view.updateStatus();
+  assert.equal(statusCalls, 0, 'hidden Status tab must not inspect kernel state');
+  view.activeTab = 'status';
+  await view.updateStatus();
+  assert.equal(elements['s-ct-count'].textContent, '0 / 30720');
+  assert.equal(elements['s-ct-insert-failed'].textContent, '7000000000');
+  assert.equal(elements['s-ct-insert-failed'].style.color, '', 'historical global errors are not a red MAP-E fault');
+  assert.equal(elements['s-ct-drop'].textContent, '0');
+  const dropField = fields.find(field => field.id === 's-ct-drop');
+  for (const drop of [undefined, null, '', 'bad', -1, [0], {}])
+    assert.equal(dropField.get({ conntrack: { drop } }).text, 'Unavailable');
+  assert.equal(dropField.get({ conntrack: { drop: 0 } }).text, '0');
+  statusReply = { code: 0, stdout: '{"mape_state":"up"}' };
+  await view.updateStatus();
+  assert.equal(elements['s-mape-state'].textContent, 'up', 'older backends still show interface status');
+  assert.equal(elements['s-ct-drop'].textContent, 'Unavailable');
+  for (statusReply of [{ code: 1, stdout: '{}' }, { code: 0, stdout: '' },
+    { code: 0, stdout: 'not json' }, { code: 0, stdout: 'null' },
+    { code: 0, stdout: '[]' }, { code: 0, stdout: '{}' },
+    { code: 0, stdout: '{"mape_state":true}' }, new Error('RPC unavailable')]) {
+    await view.updateStatus();
+    for (const field of fields) assert.equal(elements[field.id].textContent, 'Unavailable', 'do not retain stale successful status');
+  }
+  console.log('PASS kernel diagnostic UI: zero/unavailable/large counters, old backend, failed refresh and inactive-tab guard');
   console.log(`PASS ${count} backend checks + package/UI structure and shell/JS syntax. Real browser/OpenWrt kernel not exercised.`);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

@@ -499,7 +499,7 @@ msgstr ""
 msgid "IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes."
 msgstr ""
 
-msgid "IPv4 checks port allocation and local NAT conflicts. IPv6 checks the LAN route and duplicate managed rules, not service availability or other firewall policies."
+msgid "Both IP versions check the current LAN route. IPv4 also checks port allocation and local NAT conflicts; IPv6 checks duplicate managed rules. Neither verifies service availability or every firewall policy."
 msgstr ""
 
 msgid "Unable to load devices. Enter addresses manually."
@@ -524,4 +524,22 @@ msgid "Dual stack creates two independent rules. If one fails, review the saved 
 msgstr ""
 
 msgid "Partial completion is possible. Review existing rules before retrying."
+msgstr ""
+
+msgid "Unavailable"
+msgstr ""
+
+msgid "System conntrack entries / limit"
+msgstr ""
+
+msgid "Conntrack insert failures (total)"
+msgstr ""
+
+msgid "Conntrack drops (total)"
+msgstr ""
+
+msgid "Conntrack early evictions (total)"
+msgstr ""
+
+msgid "Conntrack statistics cover the whole router, not just MAP-E. Failure and eviction counters are cumulative, not measurements of MAP-E port exhaustion or Internet packet loss. Unavailable means the kernel state could not be read."
 msgstr ""

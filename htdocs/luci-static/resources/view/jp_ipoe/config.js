@@ -54,6 +54,11 @@ return view.extend({
 	// Single source for the status table: renderStatusPanel builds the rows
 	// from id/label, updateStatus fills them via get(data).
 	statusFields: function() {
+		var counter = function(data, key) {
+			var value = (data.conntrack || {})[key];
+			return (typeof value === 'string' || typeof value === 'number') && /^[0-9]+$/.test(value)
+				? String(value) : _('Unavailable');
+		};
 		return [
 			{ id: 's-wan6-iface', label: _('WAN6 Interface'), get: function(d) { return { text: d.wan6_iface || '-' }; } },
 			{ id: 's-wan6-device', label: _('WAN6 Device'), get: function(d) { return { text: d.wan6_device || '-' }; } },
@@ -63,7 +68,11 @@ return view.extend({
 			{ id: 's-mape-ipv4', label: _('MAP-E IPv4 Address'), get: function(d) { return { text: d.mape_ipv4 || _('Not assigned'), ok: !!d.mape_ipv4 }; } },
 			{ id: 's-br-addr', label: _('Border Relay (BR)'), get: function(d) { return { text: d.br_addr || _('Not set'), ok: !!d.br_addr }; } },
 			{ id: 's-port-info', label: _('Assigned Port Ranges'), get: function(d) { return { text: d.port_info || '-' }; } },
-			{ id: 's-pppoe-metric', label: _('PPPoE Fallback Metric'), get: function(d) { return { text: d.pppoe_fallback_metrics || _('None') }; } }
+			{ id: 's-pppoe-metric', label: _('PPPoE Fallback Metric'), get: function(d) { return { text: d.pppoe_fallback_metrics || _('None') }; } },
+			{ id: 's-ct-count', label: _('System conntrack entries / limit'), get: function(d) { return { text: counter(d, 'count') + ' / ' + counter(d, 'max') }; } },
+			{ id: 's-ct-insert-failed', label: _('Conntrack insert failures (total)'), get: function(d) { return { text: counter(d, 'insert_failed') }; } },
+			{ id: 's-ct-drop', label: _('Conntrack drops (total)'), get: function(d) { return { text: counter(d, 'drop') }; } },
+			{ id: 's-ct-early-drop', label: _('Conntrack early evictions (total)'), get: function(d) { return { text: counter(d, 'early_drop') }; } }
 		];
 	},
 
@@ -361,7 +370,7 @@ return view.extend({
 			E('details', {}, [
 				E('summary', {}, _('Checks and limitations')),
 				E('p', { 'class': 'jp-forward-note' }, _('IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes.')),
-				E('p', { 'class': 'jp-forward-note' }, _('IPv4 checks port allocation and local NAT conflicts. IPv6 checks the LAN route and duplicate managed rules, not service availability or other firewall policies.')),
+				E('p', { 'class': 'jp-forward-note' }, _('Both IP versions check the current LAN route. IPv4 also checks port allocation and local NAT conflicts; IPv6 checks duplicate managed rules. Neither verifies service availability or every firewall policy.')),
 				E('p', { 'class': 'jp-forward-note' }, _('Only assigned public IPv4 ports can be forwarded; LAN service ports are unrestricted. Checks cover configured redirects, router bindings and current outbound NAT, not Internet reachability or arbitrary custom nftables rules. Stop UPnP before use.')),
 				E('p', { 'class': 'jp-forward-note' }, _('Rules target the main lan IPv4 subnet. Ports are automatically excluded from outbound NAT without changing manual reservations. A changed public IPv4 or incompatible port allocation suspends the rule; delete and recreate it.'))
 			])
@@ -570,6 +579,7 @@ return view.extend({
 					]);
 				})))
 			]),
+			E('p', { 'class': 'cbi-map-descr' }, _('Conntrack statistics cover the whole router, not just MAP-E. Failure and eviction counters are cumulative, not measurements of MAP-E port exhaustion or Internet packet loss. Unavailable means the kernel state could not be read.')),
 			E('div', { 'class': 'cbi-page-actions', 'style': 'display:flex; gap:8px;' }, [
 				E('button', {
 					'class': 'btn cbi-button cbi-button-action',
@@ -591,17 +601,22 @@ return view.extend({
 			return Promise.resolve();
 
 		return fs.exec('/usr/sbin/jp-ipoe-setup', ['status']).then(function(res) {
-			if (res.code === 0 && res.stdout) {
-				try {
-					var data = JSON.parse(res.stdout);
-					this.statusFields().forEach(function(field) {
-						var v = field.get(data);
-						this.setField(field.id, v.text, v.ok, v.bold);
-					}, this);
-				} catch(e) {
-					ui.addNotification(null, E('p', _('Failed to parse status')), 'error');
-				}
-			}
+			if (res.code !== 0 || !res.stdout)
+				throw new Error('Status unavailable');
+			var data = JSON.parse(res.stdout);
+			if (!data || typeof data !== 'object' || Array.isArray(data) ||
+				(data.mape_state !== 'up' && data.mape_state !== 'down'))
+				throw new Error('Invalid status response');
+			this.statusFields().forEach(function(field) {
+				var v = field.get(data);
+				this.setField(field.id, v.text, v.ok, v.bold);
+			}, this);
+		}.bind(this)).catch(function() {
+			// Do not leave an old successful snapshot looking current after an
+			// exec/parse failure, or create a notification on every failed poll.
+			this.statusFields().forEach(function(field) {
+				this.setField(field.id, _('Unavailable'));
+			}, this);
 		}.bind(this));
 	},
 

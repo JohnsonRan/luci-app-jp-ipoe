@@ -146,7 +146,7 @@ jp_forward_add() {
 	[ -z "$requested" ] || jp_forward_port_valid "$requested" || { jp_forward_error "Invalid external port (1-65535)."; return 1; }
 	jp_forward_clean_config || return 1
 	jp_forward_runtime || { jp_forward_error "MAP-E must be up with a valid assigned port set."; return 1; }
-	jp_forward_lan_valid "$address" || { jp_forward_error "Destination must be a host in the current lan IPv4 subnet, not the router or broadcast address."; return 1; }
+	jp_forward_lan_valid "$address" || { jp_forward_error "Destination must be a directly connected host in the current lan IPv4 subnet, not the router or broadcast address; the LAN route must be readable."; return 1; }
 	src_zone="$(jp_forward_zone "$MAPE_IFACE")" && dest_zone="$(jp_forward_zone lan)" && [ "$src_zone" != "$dest_zone" ] || {
 		jp_forward_error "MAP-E and lan must belong to distinct, unambiguous firewall zones."
 		return 1

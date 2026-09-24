@@ -14,7 +14,7 @@ access to devices on your LAN.
 
 ## Requirements
 
-- OpenWrt with fw4/nftables (22.03 or newer) and LuCI.
+- OpenWrt with **Linux 6.12 or newer**, fw4/nftables and LuCI.
 - An existing DHCPv6 WAN interface, usually `wan6`.
 - A compatible shared-IPv4 MAP-E service. Automatic parameter lookup includes
   **OCN Virtual Connect** and **v6プラス (JPNE)** rule data.
@@ -33,13 +33,15 @@ connections are not supported.**
    Match your OpenWrt release and package format: builds cover **24.10 (`ipk`)
    and 25.12 (`apk`)**, for x86/64 and arm64. For other firmware, use a
    [matching SDK build](docs/development.md#build-packages).
+   **Stock 24.10 uses Linux 6.6 and is below the supported kernel baseline**;
+   the `ipk` build is for compatible custom firmware with Linux 6.12 or newer.
 2. Install using LuCI's package manager, or upload the file to `/tmp` and use
    one of the SSH examples below. Rename the uploaded file to the example's
    filename first.
 3. Refresh LuCI, then open **Network → JP IPoE**. Configuration, Status and
    Port Forwarding are tabs on the same page.
 
-For OpenWrt 24.10:
+For compatible `ipk` firmware with Linux 6.12 or newer:
 
 ```sh
 opkg update
@@ -116,14 +118,21 @@ keep your configuration backup.
 
 PPPoE is given a lower route priority when present. During boot, or when WAN6
 needs recovery, PPPoE may be stopped and WAN6 restarted. Stopped PPPoE interfaces
-are restored after successful IPoE startup. If startup fails, check whether your
-PPPoE backup needs to be started manually in **Network → Interfaces**.
+are restored on a best-effort basis after the operation returns, whether setup
+succeeds or fails. After an interrupted operation or a failed restoration,
+check whether your PPPoE backup needs starting in **Network → Interfaces**.
+
+The **Status** tab also shows system conntrack usage and cumulative failure/
+eviction counters. These cover the whole router, not just MAP-E, and do not
+measure your assigned port usage or Internet packet loss. Compare successive
+readings when troubleshooting; **Unavailable** means inspection failed, not zero.
 
 ## Port forwarding
 
 Open **Port Forwarding**, choose **IPv4**, **IPv6**, or **IPv4 + IPv6**, then
-select a device or enter its address manually. Targets must be on the main
-`lan` network.
+select a device or enter its address manually. Targets must be directly on the
+main `lan` network. IPv4 checks both subnet membership and the current route;
+a destination routed through another gateway or interface is rejected.
 
 The device picker fills current addresses; **it does not bind a rule to a MAC
 address or follow address changes**. Prefer stable addresses, such as a DHCP

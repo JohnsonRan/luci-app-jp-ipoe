@@ -90,7 +90,7 @@ jp_forward_zone() {
 }
 
 jp_forward_lan_valid() {
-	local subnet router
+	local subnet router device route
 	jp_forward_ipv4_valid "$1" || return 1
 	network_get_subnet subnet lan && network_get_ipaddr router lan || return 1
 	[ "$1" != "$router" ] || return 1
@@ -100,7 +100,22 @@ jp_forward_lan_valid() {
 			split(subnet,s,"/"); if (s[2] !~ /^[0-9]+$/ || s[2] > 32) exit 1
 			size = 2 ^ (32-s[2]); net = int(ip(s[1])/size); host = ip(address)
 			if (int(host/size) != net || (size > 2 && (host == net*size || host == (net+1)*size-1))) exit 1
-		}'
+		}' || return 1
+
+	# Subnet membership alone does not exclude a more-specific route elsewhere.
+	# Keep the address/subnet checks above; this is a current FIB check, not a
+	# reachability test or an audit of policy routing under other packet marks.
+	network_get_device device lan && [ -n "$device" ] || return 1
+	route="$(ip -4 route get "$1" 2>/dev/null)" || return 1
+	printf '%s\n' "$route" | awk -v address="$1" -v dev="$device" '
+		NR == 1 {
+			if ($1 != address) bad=1
+			for (i=1; i<NF; i++) {
+				if ($i == "via") bad=1
+				if ($i == "dev" && $(i+1) == dev) found=1
+			}
+		}
+		END { exit (bad || !found) }'
 }
 
 jp_forward_protocol_overlap() {

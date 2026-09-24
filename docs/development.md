@@ -12,7 +12,11 @@ dependencies are `map` and `conntrack`; fw4 supplies ucode.
 
 The [CI workflow](../.github/workflows/build-packages.yml) builds with OpenWrt
 24.10 (`ipk`) and 25.12 (`apk`) SDKs for x86/64 and armsr/armv8. Use an SDK
-matching the target firmware and configured package feeds.
+matching the target firmware and configured package feeds. The supported
+runtime kernel baseline is **Linux 6.12**. Stock OpenWrt 24.10 uses 6.6, so its
+SDK output is retained for compatible custom `ipk` firmware with a 6.12+ kernel,
+not as a claim of stock 24.10 runtime support. Kernel versions alone do not
+establish that optional modules or userspace tools are present.
 
 Copy this repository into `package/luci-app-jp-ipoe` in that SDK, then run
 these commands from the SDK root:
@@ -57,6 +61,22 @@ Status polling runs every ten seconds only while the Status tab is visible;
 entering that tab also refreshes immediately. There is one menu node, not
 separate configuration/status pages.
 
+### Kernel diagnostics
+
+`jp-ipoe-info status` includes a `conntrack` object with `count`, `max`,
+`insert_failed`, `drop` and `early_drop`. Values are decimal strings (including
+`"0"`), avoiding 32-bit JSON truncation; `""` means unavailable. Counts/limits
+come from `/proc/sys/net/netfilter/`; failure/eviction counters sum complete
+per-CPU `conntrack -S` records. Command failure, an empty dump, missing fields,
+malformed numbers or duplicate CPU records must not silently produce zeros.
+Failure of this inspection does not fail the rest of interface status.
+
+These are cumulative **system-wide** conntrack counters, not MAP-E port
+occupancy, per-interface drops, or end-to-end packet loss. The UI labels this
+scope and clears stale fields if a refresh fails. It tolerates older backends
+without these fields. There is no background collector or additional package
+dependency; polling remains confined to the visible Status tab.
+
 ### Apply, repair and boot
 
 Normal `start` first calls the read-only `configuration_is_current` check. It
@@ -82,9 +102,12 @@ of the user's previous configuration.
 `repair` deliberately uses managed stop/start and bypasses the shortcut.
 When boot startup is enabled, `boot` first stops managed IPoE and WAN PPPoE
 interfaces, restarts WAN6, then forces the full pipeline. Ordinary full setup
-can also stop PPPoE and retry WAN6 if initial IPv6 acquisition fails. Stopped
-PPPoE interfaces are restored only after successful IPoE startup. Do not make
-ordinary Apply perform the unconditional boot recovery sequence.
+can also stop PPPoE and retry WAN6 if initial IPv6 acquisition fails. After a
+locked operation returns, `run_locked()` attempts to restore its stopped PPPoE
+interfaces on both success and failure, while preserving the operation's exit
+status. Abrupt termination or a failed restoration is not covered by a success
+guarantee. Do not make ordinary Apply perform the unconditional boot recovery
+sequence.
 
 ### WAN6 identity and MAP parameters
 
@@ -130,11 +153,16 @@ generation must update the checker. Teardown removes the per-interface table.
 
 ### IPv4 forwarding
 
-Creation checks assigned ranges, manual reservations, LAN membership,
-protocol-aware UCI redirects, router bindings (including IPv6 sockets) and
+Creation checks assigned ranges, manual reservations, strict IPv4/subnet
+membership and a direct `lan` FIB route, protocol-aware UCI redirects,
+router bindings (including IPv6 sockets) and
 outbound conntrack mappings. It requires readable socket/conntrack state and
 rejects active `miniupnpd`. Custom nft rules, other dynamic mapping services and
-external reachability are outside these local checks.
+external reachability are outside these local checks. `ip -4 route get` rejects
+local, indirect and non-LAN destinations even if their addresses fall inside
+the LAN subnet. Query failure suspends publication instead of assuming a safe
+route. This lookup is a snapshot in its query context, not a proof about future
+routes or packets with different policy-routing marks/sources.
 
 The SNAT reservation is the union of manual ports and saved managed ports for
 the current public IPv4. A managed reservation excludes both TCP and UDP, even

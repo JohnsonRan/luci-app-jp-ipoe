@@ -23,6 +23,47 @@ find_pppoe_sections() {
 	printf '%s' "$PPPOE_SECTION_MATCHES"
 }
 
+# System-wide, cumulative counters, not MAP-E allocation or loss statistics.
+# Empty strings mean unavailable; a failed/partial dump must never become zero.
+jp_ipoe_info_conntrack() {
+	local key value data totals=""
+
+	json_add_object conntrack
+	for key in count max; do
+		value="$(cat "/proc/sys/net/netfilter/nf_conntrack_$key" 2>/dev/null)" || value=""
+		case "$value" in ''|*[!0-9]*) value="" ;; esac
+		json_add_string "$key" "$value"
+	done
+
+	if data="$(conntrack -S 2>/dev/null)"; then
+		totals="$(printf '%s\n' "$data" | LC_ALL=C awk '
+			BEGIN { split("insert_failed drop early_drop", keys, " ") }
+			NF {
+				if ($1 !~ /^cpu=[0-9]+$/ || cpus[$1]++) bad=1
+				rows++
+				for (k in keys) seen[keys[k]]=0
+				for (i=2; i<=NF; i++) {
+					n=split($i,a,"=")
+					if (a[1]=="insert_failed" || a[1]=="drop" || a[1]=="early_drop") {
+						if (n!=2 || a[2] !~ /^[0-9]+$/ || seen[a[1]]++) bad=1
+						sum[a[1]]+=a[2]
+					}
+				}
+				for (k in keys) if (!seen[keys[k]]) bad=1
+			}
+			END {
+				if (!rows || bad) exit 1
+				printf "%.0f %.0f %.0f\n", sum["insert_failed"], sum["drop"], sum["early_drop"]
+			}')" || totals=""
+	fi
+	# Only decimal totals generated above; strings avoid 32-bit JSON truncation.
+	set -- $totals
+	json_add_string insert_failed "${1:-}"
+	json_add_string drop "${2:-}"
+	json_add_string early_drop "${3:-}"
+	json_close_object
+}
+
 jp_ipoe_info_status() {
 	local wan6_iface="$1"
 	local mape_iface="$2"
@@ -71,6 +112,7 @@ jp_ipoe_info_status() {
 	json_add_string "br_addr" "${br_addr:-}"
 	json_add_string "port_info" "${port_info:-}"
 	json_add_string "pppoe_fallback_metrics" "${pppoe_fallback_metrics:-}"
+	jp_ipoe_info_conntrack
 	json_dump
 }
 
