@@ -31,16 +31,19 @@ jp_forward_runtime() {
 }
 
 jp_forward_active() {
-	local data raw rc up
+	local data
 	JP_ACTIVE=""
 	data="$(ubus call "network.interface.$MAPE_IFACE" status 2>/dev/null)" || return 1
-	printf '%s' "$data" | jsonfilter -e '@' >/dev/null 2>&1 || return 1
-	up="$(printf '%s' "$data" | jsonfilter -e '@.up' 2>/dev/null)" || return 1
-	case "$up" in 0|1|false|true) ;; *) return 1 ;; esac
-	raw="$(printf '%s' "$data" | jsonfilter -e '@.data.firewall[*].name' 2>/dev/null)"; rc=$?
-	[ "$rc" -le 1 ] || return 1
-	JP_ACTIVE=""
-	[ -z "$raw" ] || JP_ACTIVE="$(printf '%s\n' "$raw" | tr '\n' ' ')"
+	# ucode is already a fw4 dependency. An absent firewall key is legitimate;
+	# a malformed status or failed parser is not evidence of an empty rule set.
+	JP_ACTIVE="$(ucode -e '
+		let state = json(ARGV[0]);
+		if (type(state) != "object" || type(state.up) != "bool" || type(state.data) != "object") exit(1);
+		let rules = state.data.firewall ?? [];
+		if (type(rules) != "array" || length(filter(rules, r =>
+			type(r) != "object" || (r.name != null && type(r.name) != "string")))) exit(1);
+		print(join(" ", map(rules, r => r.name ?? "")));
+	' "$data")"
 }
 
 jp_forward_list_cb() {

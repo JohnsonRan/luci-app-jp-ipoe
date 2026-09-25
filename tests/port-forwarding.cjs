@@ -46,6 +46,7 @@ json_close_array() { :; }
 json_close_object() { echo end; }
 json_dump() { :; }
 ubus() { case "$*" in *"status"*) echo '{"up":true,"data":{"firewall":[]}}';; *) return 0;; esac; }
+ucode() { [ -z "$MOCK_JSON_FAIL" ] || return 1; node "$TEST_TMP/ucode-mock.cjs" "$@"; }
 jsonfilter() {
  [ -z "$MOCK_JSON_FAIL" ] || return 1
  awk -v pat="$2" '
@@ -116,6 +117,16 @@ function run(name, body, extra = '') {
 
 async function main() {
 try {
+  // Execute the JS-compatible runtime inspector verbatim with ucode builtin
+  // equivalents. This covers its decisions, not native ucode compilation.
+  fs.writeFileSync(tmp + '/ucode-mock.cjs', `
+const args = process.argv.slice(2);
+if (args[0] !== '-e') process.exit(1);
+new Function('ARGV', 'json', 'type', 'filter', 'map', 'length', 'join', 'print', 'exit', args[1])(
+ args.slice(2), JSON.parse, v => v == null ? null : Array.isArray(v) ? 'array' : typeof v === 'boolean' ? 'bool' : typeof v,
+ (a, fn) => a.filter(fn), (a, fn) => a.map(fn), a => a.length,
+ (sep, a) => a.join(sep), s => process.stdout.write(String(s)), n => process.exit(n));
+`);
   fs.writeFileSync(tmp + '/uuid', '00000000-0000-0000-0000-000000000001\n');
   fs.mkdirSync(tmp + '/proc');
   fs.mkdirSync(tmp + '/netfilter');
@@ -502,6 +513,11 @@ ubus() { echo 'bad json'; }
 jp_forward_active && fail malformed-json
 ubus() { echo '{}'; }
 jp_forward_active && fail incomplete-status
+for STATUS_JSON in '{"up":true}' '{"up":true,"data":null}' '{"up":true,"data":{"firewall":"unknown"}}' \
+ '{"up":true,"data":{"firewall":[null]}}' '{"up":true,"data":{"firewall":[{"name":123}]}}'; do
+ ubus() { printf '%s' "$STATUS_JSON"; }
+ jp_forward_active && fail malformed-runtime-data
+done
 MOCK_JSON_FAIL=1
 ubus() { echo '{"up":true}'; }
 jp_forward_active && fail jsonfilter-fail
@@ -509,6 +525,9 @@ MOCK_JSON_FAIL=''
 ubus() { echo '{"up":false,"data":{"firewall":[]}}'; }
 jp_forward_active || fail genuine-down
 [ "$JP_ACTIVE" = "" ] || fail "expected empty active, got $JP_ACTIVE"
+ubus() { echo '{"up":false,"data":{}}'; }
+jp_forward_active || fail absent-firewall-key
+[ "$JP_ACTIVE" = "" ] || fail missing-key-not-empty
 ubus() { echo '{"up":true,"data":{"firewall":[{"name":"jp_ipoe_saved"},{"name":"jp_ipoe_other"}]}}'; }
 jp_forward_active || fail active-rules
 list_contains JP_ACTIVE "jp_ipoe_saved" || fail missing-saved
