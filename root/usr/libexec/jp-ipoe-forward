@@ -31,9 +31,16 @@ jp_forward_runtime() {
 }
 
 jp_forward_active() {
-	local data
+	local data raw rc up
+	JP_ACTIVE=""
 	data="$(ubus call "network.interface.$MAPE_IFACE" status 2>/dev/null)" || return 1
-	JP_ACTIVE="$(printf '%s' "$data" | jsonfilter -e '@.data.firewall[*].name' 2>/dev/null | tr '\n' ' ')"
+	printf '%s' "$data" | jsonfilter -e '@' >/dev/null 2>&1 || return 1
+	up="$(printf '%s' "$data" | jsonfilter -e '@.up' 2>/dev/null)" || return 1
+	case "$up" in 0|1|false|true) ;; *) return 1 ;; esac
+	raw="$(printf '%s' "$data" | jsonfilter -e '@.data.firewall[*].name' 2>/dev/null)"; rc=$?
+	[ "$rc" -le 1 ] || return 1
+	JP_ACTIVE=""
+	[ -z "$raw" ] || JP_ACTIVE="$(printf '%s\n' "$raw" | tr '\n' ' ')"
 }
 
 jp_forward_list_cb() {
@@ -204,7 +211,7 @@ jp_forward_add() {
 }
 
 jp_forward_remove() {
-	local section="$1" iface type
+	local section="$1" iface type status is_up
 	case "$section" in ''|*[!A-Za-z0-9_]*) jp_forward_error "Invalid forwarding rule ID."; return 1 ;; esac
 	jp_forward_clean_config || return 1
 	config_load jp_ipoe
@@ -214,17 +221,40 @@ jp_forward_remove() {
 	case "$iface" in ''|*[!A-Za-z0-9_]*) jp_forward_error "Invalid saved MAP-E interface."; return 1 ;; esac
 	MAPE_IFACE="$iface"
 	network_flush_cache
-	if [ "$(uci -q get network."$MAPE_IFACE".proto)" = map ] &&
-		[ "$(uci -q get network."$MAPE_IFACE".maptype)" = map-e ] && network_is_up "$MAPE_IFACE"; then
-		jp_forward_runtime && jp_forward_withdraw "$section" || {
+	# Saved UCI protocol (or a failed read) does not establish netifd state.
+	# Even stale allocations require positive runtime inspection before release.
+	status="$(ubus call "network.interface.$MAPE_IFACE" status 2>/dev/null)" || {
+		jp_forward_error "Removal could not be confirmed. Saved rule/reservation retained; retry deletion. Tunnel not restarted."
+		return 1
+	}
+	printf '%s' "$status" | jsonfilter -e '@' >/dev/null 2>&1 || {
+		jp_forward_error "Removal could not be confirmed. Saved rule/reservation retained; retry deletion. Tunnel not restarted."
+		return 1
+	}
+	is_up="$(printf '%s' "$status" | jsonfilter -e '@.up' 2>/dev/null)" || {
+		jp_forward_error "Interface state is unreadable; saved rule/reservation retained."
+		return 1
+	}
+	case "$is_up" in
+		1|true)
+			jp_forward_runtime && jp_forward_withdraw "$section" || {
+				jp_forward_error "Removal could not be confirmed. Saved rule/reservation retained; retry deletion. Tunnel not restarted."
+				return 1
+			}
+			jp_forward_release "$section"
+		;;
+		0|false)
+			jp_forward_active && ! list_contains JP_ACTIVE "jp_ipoe_$section" || {
+				jp_forward_error "Removal could not be confirmed. Saved rule/reservation retained; retry deletion. Tunnel not restarted."
+				return 1
+			}
+			uci delete "jp_ipoe.$section" && uci commit jp_ipoe
+		;;
+		*)
 			jp_forward_error "Removal could not be confirmed. Saved rule/reservation retained; retry deletion. Tunnel not restarted."
 			return 1
-		}
-		jp_forward_release "$section"
-	else
-		# Offline/stale interface: only remove saved state, never start it.
-		uci delete "jp_ipoe.$section" && uci commit jp_ipoe
-	fi
+		;;
+	esac
 }
 
 # Native IPv6 uses persistent fw4 ACCEPT rules, not MAP-E DNAT/SNAT.

@@ -45,6 +45,36 @@ json_add_array() { :; }
 json_close_array() { :; }
 json_close_object() { echo end; }
 json_dump() { :; }
+ubus() { case "$*" in *"status"*) echo '{"up":true,"data":{"firewall":[]}}';; *) return 0;; esac; }
+jsonfilter() {
+ [ -z "$MOCK_JSON_FAIL" ] || return 1
+ awk -v pat="$2" '
+ BEGIN { RS = "" }
+ {
+  str = $0
+  if (str !~ /^[{].*[}]$/) exit 126
+  if (pat == "@") exit 0
+  if (pat == "@.up") {
+   if (str ~ /"up"[ \t]*:[ \t]*(true|1)/) { print "1"; exit 0 }
+   if (str ~ /"up"[ \t]*:[ \t]*(false|0)/) { print "0"; exit 0 }
+   exit 1
+  }
+  if (pat == "@.data.firewall[*].name" || pat == "@.firewall[0].name") {
+   count = 0
+   while (match(str, /"name"[ \t]*:[ \t]*"([^"]+)"/)) {
+    matched = substr(str, RSTART, RLENGTH)
+    sub(/^"name"[ \t]*:[ \t]*"/, "", matched)
+    sub(/"$/, "", matched)
+    print matched
+    count++
+    str = substr(str, RSTART + RLENGTH)
+    if (pat == "@.firewall[0].name") break
+   }
+   exit (count > 0 ? 0 : 1)
+  }
+  exit 1
+ }'
+}
 DB_jp_ipoe_sections='config saved other'
 DB_jp_ipoe_config_TYPE=jp_ipoe
 DB_jp_ipoe_config_dont_snat_to=1000
@@ -411,12 +441,81 @@ exit 0
   assert.doesNotMatch(log, /delete jp_ipoe.saved|snat/);
 
   fs.writeFileSync(tmp + '/uci-log', '');
+  run('remove: unknown interface state fails closed and retains saved rule', `
+ubus() { return 1; }
+jp_forward_remove saved && fail ubus-error
+ubus() { echo 'bad json'; }
+jp_forward_remove saved && fail malformed-json
+MOCK_JSON_FAIL=1
+ubus() { echo '{"up":true}'; }
+jp_forward_remove saved && fail jsonfilter-error
+MOCK_JSON_FAIL=''
+exit 0
+`, cliMocks);
+  log = fs.readFileSync(tmp + '/uci-log', 'utf8');
+  assert.doesNotMatch(log, /delete jp_ipoe.saved|snat/);
+
+  run('remove: stale UCI cannot bypass runtime evidence or hide cleanup failures', `
+jp_forward_clean_config() { :; }
+uci() { [ "$1" = -q ] && return 1; fail mutation-without-runtime; }
+ubus() { return 1; }
+jp_forward_remove saved && fail absent-config-bypass
+uci() { [ "$1" = -q ] && { echo static; return 0; }; fail mutation-without-runtime; }
+jp_forward_remove saved && fail changed-config-bypass
+ubus() { echo '{"up":false,"data":{"firewall":[]}}'; }
+jp_forward_active() { JP_ACTIVE=''; }
+for failed in delete commit; do
+ uci() { [ "$1" != "$failed" ]; }
+ jp_forward_remove saved && fail "hidden $failed failure"
+done
+exit 0
+`, command);
+
+  fs.writeFileSync(tmp + '/uci-log', '');
+  run('remove: genuine down interface confirms absence before deleting saved rule', `
+ubus() { echo '{"up":false,"data":{"firewall":[{"name":"jp_ipoe_saved"}]}}'; }
+jp_forward_active() { JP_ACTIVE="jp_ipoe_saved"; }
+jp_forward_remove saved && fail unconfirmed-down
+ubus() { echo '{"up":false,"data":{"firewall":[]}}'; }
+jp_forward_active() { JP_ACTIVE=""; }
+jp_forward_remove saved || fail genuine-down-remove
+exit 0
+`, cliMocks);
+  log = fs.readFileSync(tmp + '/uci-log', 'utf8');
+  assert.match(log, /delete jp_ipoe.saved/);
+  assert.match(log, /commit jp_ipoe/);
+  assert.doesNotMatch(log, /snat|withdraw:/);
+
+  fs.writeFileSync(tmp + '/uci-log', '');
   run('remove: withdraw before deleting config and releasing reservation', `
 jp_forward_remove saved || fail remove
 `, cliMocks);
   log = fs.readFileSync(tmp + '/uci-log', 'utf8');
   assert(log.indexOf('withdraw:saved') < log.indexOf('delete jp_ipoe.saved'));
   assert(log.indexOf('commit jp_ipoe') < log.indexOf('snat'));
+
+  run('active forwards: fail closed on ubus error and malformed JSON, extract active rules', `
+MAPE_IFACE=wan6mape
+ubus() { return 1; }
+jp_forward_active && fail ubus-fail
+ubus() { echo 'bad json'; }
+jp_forward_active && fail malformed-json
+ubus() { echo '{}'; }
+jp_forward_active && fail incomplete-status
+MOCK_JSON_FAIL=1
+ubus() { echo '{"up":true}'; }
+jp_forward_active && fail jsonfilter-fail
+MOCK_JSON_FAIL=''
+ubus() { echo '{"up":false,"data":{"firewall":[]}}'; }
+jp_forward_active || fail genuine-down
+[ "$JP_ACTIVE" = "" ] || fail "expected empty active, got $JP_ACTIVE"
+ubus() { echo '{"up":true,"data":{"firewall":[{"name":"jp_ipoe_saved"},{"name":"jp_ipoe_other"}]}}'; }
+jp_forward_active || fail active-rules
+list_contains JP_ACTIVE "jp_ipoe_saved" || fail missing-saved
+list_contains JP_ACTIVE "jp_ipoe_other" || fail missing-other
+list_contains JP_ACTIVE "jp_ipoe_missing" && fail unexpected-missing
+exit 0
+`, command);
 
   fs.writeFileSync(tmp + '/uci-log', '');
   run('add: unconfirmed rollback keeps saved rule without reconnecting', `
@@ -428,6 +527,22 @@ exit 0
   assert.doesNotMatch(log, /delete jp_ipoe.created/);
   assert.equal((log.match(/snat/g) || []).length, 1);
   assert.doesNotMatch(command, /\b(?:ifdown|ifup)\b|conntrack\s+-(?:D|F)\b/);
+
+  fs.writeFileSync(tmp + '/uci-log', '');
+  run('add: failed active inspection during rollback retains saved rule and reservation', `
+jp_forward_publish() {
+ case "$2" in
+  '{"firewall":[]}') echo "withdraw:$1" >> "$TEST_TMP/uci-log";;
+  *) echo "publish:$1" >> "$TEST_TMP/uci-log";;
+ esac
+}
+jp_forward_active() { return 1; }
+jp_forward_add tcp 192.168.1.10 8080 '' && fail unconfirmed-rollback
+exit 0
+`, cliMocks);
+  log = fs.readFileSync(tmp + '/uci-log', 'utf8');
+  assert.doesNotMatch(log, /delete jp_ipoe.created/);
+  assert.equal((log.match(/snat/g) || []).length, 1);
 
   run('release: cleanup failure stops later steps and propagates SNAT failure', `
 for failed in delete commit snat; do
