@@ -119,15 +119,21 @@ the tunnel. MAP-E MTU is `1460`; PPPoE fallback metric is `200`. A failed apply
 after network changes attempts to tear down managed MAP-E state; it is not a full
 restore of the user's previous configuration. Required UCI writes, commits,
 ifup, odhcpd restart and fw4 reload failures must not be hidden by later logs.
-A section newly created by this invocation can be removed even if its initial
+A MAP section newly created by this invocation can be removed even if its initial
 options were only partly written. If cleanup itself fails, report partial state;
 never claim the router was restored.
 
-`validate_interface_roles()` rejects unsafe/equal names, LAN, a WAN6 that is not
-an existing DHCPv6 interface, and a MAP name already used by an unrelated
+`setup_wan6()` creates a missing named WAN6 on the selected device. If its
+configuration writes or commit fail, it attempts to delete only the interface
+created by that call. Once WAN6 configuration commits successfully, later startup
+failures and Stop keep the interface (the managed `ip6prefix` can still be cleared).
+There is no cross-package rollback or persistent WAN6 ownership marker; inspection
+commands do not create interfaces.
+
+`validate_interface_roles()` rejects unsafe/equal names, LAN, an existing WAN6
+that is not a DHCPv6 interface, and a MAP name already used by an unrelated
 section/protocol/tunnel. An existing MAP section must use `map-e` and link to
-the selected WAN6. Stop applies the same role guards, permitting an already
-missing WAN6. These checks intentionally refuse ambiguous legacy partial state
+the selected WAN6. Start and Stop both permit a missing WAN6. These checks intentionally refuse ambiguous legacy partial state
 rather than guessing ownership.
 
 Firewall selection is read-only until ownership is validated. Prefer WAN6's
@@ -144,7 +150,8 @@ multi-LAN support, or serialize external UCI edits.
 
 `repair` deliberately uses managed stop/start and bypasses the shortcut.
 When boot startup is enabled, `boot` first stops managed IPoE and WAN PPPoE
-interfaces, restarts WAN6, then forces the full pipeline. Ordinary full setup
+interfaces, restarts WAN6 if it exists, then forces the full pipeline (which
+creates WAN6 if missing). Ordinary full setup
 can also stop PPPoE and retry WAN6 if initial IPv6 acquisition fails. After a
 locked operation returns, `run_locked()` attempts to restore its stopped PPPoE
 interfaces while still holding the lock, on both success and failure. INT, TERM
@@ -300,7 +307,9 @@ No npm dependencies are required. CI runs this suite before any SDK builds;
 Python fixture syntax is also checked there, without executing kernel tests.
 The suite includes relay/server-mode startup, interface-role and firewall
 ownership guards, failure propagation, cleanup/retry, signal/lock ordering,
-PPPoE scoping and BMR-aware status. These tests mock OpenWrt services; they do
+PPPoE scoping and BMR-aware status. WAN6 cases cover default/custom name creation,
+DUID/device selection, reuse, creation errors/retry, retention after later failure
+or Stop, and boot with/without an existing interface. These tests mock OpenWrt services; they do
 not establish live netifd/fw4 or Internet behavior. The runtime firewall inspector
 is exercised using JS-compatible ucode builtin substitutes; that is not native
 ucode compilation/execution. On Windows, the wrapper's executable Git mode is

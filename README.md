@@ -15,7 +15,6 @@ access to devices on your LAN.
 ## Requirements
 
 - OpenWrt with **Linux 6.12 or newer**, fw4/nftables and LuCI.
-- An existing DHCPv6 WAN interface, usually `wan6`.
 - A compatible shared-IPv4 MAP-E service. Automatic parameter lookup includes
   **OCN Virtual Connect** and **v6プラス (JPNE)** rule data.
 
@@ -68,20 +67,24 @@ handler. An existing unpatched handler is backed up as `map.sh.orig`.
 changes WAN6, LAN IPv6 settings, firewall membership and PPPoE route priority;
 it can interrupt IPv4 and IPv6 connectivity.
 
-1. In **Network → Interfaces**, confirm your DHCPv6 WAN interface exists.
-2. Open **Network → JP IPoE → Configuration**. Select the correct **WAN Physical
-   Device** and **IPv6 WAN Interface Name** (`wan6` unless you renamed it).
-3. For OCN Virtual Connect or v6plus, enable **Auto Parameters**. It is off by
+1. Open **Network → JP IPoE → Configuration**. Select the correct **WAN Physical
+   Device** and **IPv6 WAN Interface Name**. Choose an existing DHCPv6 interface
+   or enter a new name (default: `wan6`). A missing interface is created on
+   Apply; an existing interface using another protocol will not be overwritten.
+2. For OCN Virtual Connect or v6plus, enable **Auto Parameters**. It is off by
    default. Keep **Use Legacy MAP** enabled.
-4. Set **Enable DHCPv6/NDP Relay** to match your line:
+3. Set **Enable DHCPv6/NDP Relay** to match your line:
    - **Enabled** for a `/64` without prefix delegation (PD).
    - **Disabled** when your ISP delegates a prefix and you want normal LAN IPv6
      server mode. A delegated `/56` or `/60` can be normal.
-5. Enable **Enable at Boot** if you want setup to run during router startup.
+4. Enable **Enable at Boot** if you want setup to run during router startup.
    It is off by default.
-6. If WAN6 already has a global IPv6 address, **Preview Parameters** lets you
+5. If WAN6 already has a global IPv6 address, **Preview Parameters** lets you
    check the detected values without applying network changes.
-7. Click **Apply IPoE Configuration**.
+6. Click **Apply IPoE Configuration**.
+
+A successfully configured WAN6 interface is kept after a later MAP-E failure
+or Stop, so it can be reused on the next Apply.
 
 On the **Status** tab, check that WAN6 has global IPv6, the MAP-E tunnel is
 `up`, and an IPv4 address and assigned port ranges are shown. Then test Internet

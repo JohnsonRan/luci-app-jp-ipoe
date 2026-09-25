@@ -84,8 +84,8 @@ msgid "Configuration"
 msgstr "配置"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:73
-msgid "Set up OCN Virtual Connect / v6plus (MAP-E) over an existing DHCPv6 WAN."
-msgstr "使用现有 DHCPv6 WAN 配置 OCN Virtual Connect / v6plus（MAP-E）。"
+msgid "Set up OCN Virtual Connect / v6plus (MAP-E) over a DHCPv6 WAN."
+msgstr "通过 DHCPv6 WAN 配置 OCN Virtual Connect / v6plus（MAP-E）。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:271
 msgid "Could not resolve parameters."
@@ -224,8 +224,8 @@ msgid "Name for the MAP-E tunnel interface (default: wan6mape)."
 msgstr "MAP-E 隧道接口的名称（默认：wan6mape）。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:85
-msgid "Name of the existing DHCPv6 interface to use (default: wan6)."
-msgstr "要使用的已有 DHCPv6 接口名称（默认：wan6）。"
+msgid "Use an existing DHCPv6 interface or enter a new name; missing interfaces are created on Apply (default: wan6)."
+msgstr "选择已有 DHCPv6 接口或输入新名称；应用时会创建缺失的接口（默认：wan6）。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:64
 msgid "None"

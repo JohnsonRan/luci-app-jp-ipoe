@@ -596,6 +596,7 @@ check_writes() {
 }
 `;
   run('WAN6 UCI failures stop writes and report failure', `
+DB_network_access6_TYPE=interface; DB_network_access6_proto=dhcpv6
 ensure_wan6_duid_ll() { uci set network.access6.clientid=test; }
 check_writes setup_wan6 eth0 access6
 find_network_device_section() { echo wan_dev; }
@@ -736,6 +737,91 @@ WAN_DEVICE=eth0
 WAN6_IFACE=access6
 MAPE_IFACE=ip4map
 `;
+  // Small UCI stub scoped to the selected WAN6; no DHCP/firewall rollback model.
+  const wan6Uci = `
+get_device_mac() { echo 001122334455; }
+uci() {
+ [ "$1" != -q ] || shift
+ local op="$1" key="$2" value name kind
+ if [ "$FAIL_UCI" = "$op $key" ]; then FAIL_UCI=''; return 1; fi
+ [ "$op" != commit ] || { [ "$key" = network ]; return; }
+ value="\${key#*=}"; key="\${key%%=*}"
+ case "$key" in network."$WAN6_IFACE"|network."$WAN6_IFACE".*) ;;
+  *) [ "$op" = get ] && return 1; fail "foreign write $op $key";; esac
+ name="DB_$(printf '%s' "$key" | tr . _)"
+ [ "$key" != "network.$WAN6_IFACE" ] || name="\${name}_TYPE"
+ case "$op" in
+  get) eval "kind=\\\"\\\${DB_network_\${WAN6_IFACE}_TYPE-}\\\""; [ -n "$kind" ] || return 1
+   eval "value=\\\"\\\${$name-}\\\""; [ -n "$value" ] || return 1; printf '%s' "$value";;
+  set) export "$name=$value";;
+  delete) export "$name=";;
+  *) fail "unexpected UCI $op";;
+ esac
+}
+`;
+  run('WAN6 creation: default/custom names, selected device, DUID and existing interface reuse', `
+for WAN6_IFACE in wan6 access6; do
+ export "DB_network_\${WAN6_IFACE}_TYPE="
+ validate_interface_roles || fail missing-wan6-rejected
+ setup_wan6 eth0 "$WAN6_IFACE" || fail create
+ [ "$(uci get network."$WAN6_IFACE")" = interface ] || fail section
+ [ "$(uci get network."$WAN6_IFACE".proto)" = dhcpv6 ] || fail protocol
+ [ "$(uci get network."$WAN6_IFACE".device)" = eth0 ] || fail device
+ [ "$(uci get network."$WAN6_IFACE".clientid)" = 00030001001122334455 ] || fail duid
+ FAIL_UCI="set network.$WAN6_IFACE=interface"
+ setup_wan6 eth1 "$WAN6_IFACE" || fail reuse
+ [ "$FAIL_UCI" = "set network.$WAN6_IFACE=interface" ] || fail recreated-existing
+ [ "$(uci get network."$WAN6_IFACE".device)" = eth1 ] || fail selected-device
+ uci set network."$WAN6_IFACE".proto=pppoe
+ setup_wan6 eth0 "$WAN6_IFACE" && fail converted-pppoe
+ [ "$(uci get network."$WAN6_IFACE".proto)" = pppoe ] || fail overwritten-protocol
+ FAIL_UCI=''
+done
+`, setup + customZones + wan6Uci);
+
+  run('WAN6 creation errors remove only a new incomplete interface and permit retry', `
+for failed in 'set network.access6=interface' 'set network.access6.proto=dhcpv6' 'commit network'; do
+ DB_network_access6_TYPE=''; FAIL_UCI="$failed"
+ setup_wan6 eth0 access6 && fail ignored-error
+ uci get network.access6 && fail partial-interface-left
+ setup_wan6 eth0 access6 || fail retry
+ [ "$(uci get network.access6.proto)" = dhcpv6 ] || fail incomplete-retry
+done
+FAIL_UCI='set network.access6.proto=dhcpv6'
+setup_wan6 eth0 access6 && fail ignored-existing-error
+[ "$(uci get network.access6)" = interface ] || fail removed-existing
+DB_network_access6_TYPE=''
+config_load() { return 1; }
+uci() { fail write-after-unreadable-config; }
+setup_wan6 eth0 access6 && fail unreadable-config
+exit 0
+`, setup + customZones + wan6Uci);
+
+  run('configured WAN6 survives later startup failure and stop; boot creates a missing WAN6', `
+apply_map_protocol() { :; }
+apply_network_config() { setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE"; }
+apply_firewall_config() { return 1; }
+ifdown() { [ "$1" = ip4map ] || fail stopped-wan6; }
+for initial in '' interface; do
+ DB_network_access6_TYPE="$initial"
+ cmd_start force && fail ignored-later-failure
+ [ "$(uci get network.access6)" = interface ] || fail removed-configured-wan6
+ cmd_stop || fail stop
+ [ "$(uci get network.access6)" = interface ] || fail stop-removed-wan6
+done
+find_wan_pppoe_sections() { echo wan; }
+stop_pppoe_fallback_interfaces() { ORDER="\${ORDER}pppoe "; }
+restart_wan6_interface() { ORDER="\${ORDER}restart "; }
+cmd_start() { [ "$1" = force ] || fail non-forced-boot; ORDER="\${ORDER}start"; setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE"; }
+DB_network_access6_TYPE=''; ORDER=''
+cmd_boot || fail boot-missing
+[ "$ORDER" = 'pppoe start' ] || fail "missing boot order $ORDER"
+[ "$(uci get network.access6.proto)" = dhcpv6 ] || fail boot-did-not-create
+ORDER=''
+cmd_boot || fail boot-existing
+[ "$ORDER" = 'pppoe restart start' ] || fail "existing boot order $ORDER"
+`, setup + customZones + wan6Uci);
+
   run('zone lookup: membership before names, explicit fallback, no guessing on ambiguity', `
 uci() { fail unexpected-mutation; }
 [ "$(find_firewall_zone wan access6 wan)" = uplink ] || fail custom-zone
@@ -862,7 +948,7 @@ DB_network_lan_TYPE=interface
 DB_network_lan_proto=static
 `);
 
-  run('interface roles: reuse only matching MAP-E; absent targets allowed only for teardown', `
+  run('interface roles: reuse only matching MAP-E; absent WAN6 can be created or stopped', `
 DB_network_ip4map_TYPE=interface
 DB_network_ip4map_proto=map
 DB_network_ip4map_maptype=map-e
@@ -877,7 +963,7 @@ done
 DB_network_ip4map_TYPE=''
 validate_interface_roles || fail new-map
 DB_network_access6_TYPE=''
-validate_interface_roles && fail missing-wan6
+validate_interface_roles || fail missing-wan6-rejected
 validate_interface_roles stop || fail already-stopped
 config_load() { return 1; }
 validate_interface_roles stop && fail unreadable-config
@@ -915,7 +1001,6 @@ exit 0
   assert.equal((log.match(/PIPELINE/g) || []).length, 2);
   assert.equal((log.match(/COMMIT/g) || []).length, 3);
   assert.equal((log.match(/STOP/g) || []).length, 1);
-  assert.match(setup, /restart_wan6_interface "\$WAN6_IFACE" \|\| return 1\s+cmd_start force/);
 
   const locked = run('locked operations attempt PPPoE restoration after both success and failure', `
 LOCK_DIR="$TEST_TMP/setup-lock"
@@ -1187,6 +1272,11 @@ done
 `, '');
 
   const js = read('htdocs/luci-static/resources/view/jp_ipoe/config.js');
+  const wan6Field = js.match(/o = s\.option\(widgets.NetworkSelect, 'wan6_iface',[\s\S]*?(?=\n\n)/);
+  assert(wan6Field, 'WAN6 keeps the stock network selector');
+  assert.match(wan6Field[0], /o\.default = 'wan6';/);
+  assert.match(wan6Field[0], /o\.nocreate = false;/, 'WAN6 must allow a not-yet-created interface name');
+  console.log('PASS WAN6 selector structure: existing interfaces, custom names and wan6 default');
   let modal, notifications = 0, executions = 0;
   const messages = [], elements = {};
   let executeCommand = () => { executions++; throw new Error('Unexpected duplicate submission'); };

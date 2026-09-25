@@ -183,7 +183,7 @@ return view.extend({
 
 		var m, s, o;
 
-		m = new form.Map('jp_ipoe', null, _('Set up OCN Virtual Connect / v6plus (MAP-E) over an existing DHCPv6 WAN.'));
+		m = new form.Map('jp_ipoe', null, _('Set up OCN Virtual Connect / v6plus (MAP-E) over a DHCPv6 WAN.'));
 
 		s = m.section(form.NamedSection, 'config', 'jp_ipoe', _('Settings'));
 		s.addremove = false;
@@ -195,9 +195,9 @@ return view.extend({
 		o.default = 'eth0';
 		o.noaliases = true;
 
-		o = s.option(widgets.NetworkSelect, 'wan6_iface', _('IPv6 WAN Interface Name'), _('Name of the existing DHCPv6 interface to use (default: wan6).'));
+		o = s.option(widgets.NetworkSelect, 'wan6_iface', _('IPv6 WAN Interface Name'), _('Use an existing DHCPv6 interface or enter a new name; missing interfaces are created on Apply (default: wan6).'));
 		o.default = 'wan6';
-		o.nocreate = true;
+		o.nocreate = false;
 
 		o = s.option(form.Value, 'mape_iface', _('MAP-E Interface Name'), _('Name for the MAP-E tunnel interface (default: wan6mape).'));
 		o.default = 'wan6mape';
