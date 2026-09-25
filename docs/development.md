@@ -256,9 +256,12 @@ From the repository root, with Node.js and POSIX `sh`/`awk` available:
 node tests/port-forwarding.cjs
 ```
 
-No npm dependencies are required. Tests include relay/server-mode startup and
-custom/ambiguous firewall ownership, cleanup and PPPoE scoping. These tests mock
-OpenWrt services; they do not establish live netifd/fw4 or Internet behavior.
+No npm dependencies are required. CI runs this suite before any SDK builds;
+Python fixture syntax is also checked there, without executing kernel tests.
+The suite includes relay/server-mode startup, interface-role and firewall
+ownership guards, failure propagation, cleanup/retry, signal/lock ordering,
+PPPoE scoping and BMR-aware status. These tests mock OpenWrt services; they do
+not establish live netifd/fw4 or Internet behavior.
 
 ### Native kernel checks
 

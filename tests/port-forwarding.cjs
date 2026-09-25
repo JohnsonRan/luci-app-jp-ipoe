@@ -932,7 +932,8 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
 
   for (const p of ['root/usr/share/jp-ipoe/forward.sh', 'root/usr/share/jp-ipoe/config.sh',
     'root/usr/libexec/jp-ipoe-forward', 'root/usr/libexec/jp-ipoe-map-nft', 'root/usr/libexec/jp-ipoe-info',
-    'root/usr/share/jp-ipoe/map.sh', 'root/usr/sbin/jp-ipoe-setup']) {
+    'root/usr/share/jp-ipoe/map.sh', 'root/usr/sbin/jp-ipoe-setup', 'root/etc/init.d/jp_ipoe',
+    'root/usr/libexec/jp-ipoe-install-map']) {
     const r = cp.spawnSync('sh', ['-n', p], { cwd: root, encoding: 'utf8' });
     assert.equal(r.status, 0, p + '\n' + r.stderr);
   }

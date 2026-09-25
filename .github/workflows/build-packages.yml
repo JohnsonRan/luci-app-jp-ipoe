@@ -13,8 +13,22 @@ permissions:
   contents: read
 
 jobs:
+  regression:
+    name: Mock regressions and syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Run dependency-free regressions
+        run: node tests/port-forwarding.cjs
+      - name: Check native fixture syntax (not kernel validation)
+        run: python3 -m py_compile tests/snat-collision.py tests/snat-checker.py
+
   build:
     name: OpenWrt ${{ matrix.openwrt }} packages
+    needs: regression
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
