@@ -461,6 +461,9 @@ DB_firewall_uplink_name=uplink
 DB_firewall_uplink_network=access6
 DB_jp_ipoe_config_wan6_iface=access6
 DB_jp_ipoe_config_mape_iface=ip4map
+DB_network_sections='access6'
+DB_network_access6_TYPE=interface
+DB_network_access6_proto=dhcpv6
 WAN_DEVICE=eth0
 WAN6_IFACE=access6
 MAPE_IFACE=ip4map
@@ -560,6 +563,58 @@ exit 0
 `, setup + customZones);
   assert.match(metricWrites, /^WRITE set network.backup.metric=200$/m);
   assert.doesNotMatch(metricWrites, /network\.wan\.metric/);
+
+  run('interface roles: refuse unrelated WAN6/MAP targets before any lifecycle mutation', `
+uci() { [ "$1 $2" = '-q get' ] || fail "unexpected write $*"; echo interface; }
+ifdown() { fail unexpected-ifdown; }
+ifup() { fail unexpected-ifup; }
+apply_map_protocol() { fail installer-before-validation; }
+for scenario in lan_wan6 pppoe_wan6 map_wan map_lan foreign_map wrong_type same bad_name; do
+ DB_jp_ipoe_config_wan6_iface=access6; DB_jp_ipoe_config_mape_iface=ip4map
+ DB_network_access6_proto=dhcpv6; DB_network_ip4map_TYPE=''
+ case "$scenario" in
+  lan_wan6) DB_jp_ipoe_config_wan6_iface=lan;;
+  pppoe_wan6) DB_network_access6_proto=pppoe;;
+  map_wan) DB_jp_ipoe_config_mape_iface=wan;;
+  map_lan) DB_jp_ipoe_config_mape_iface=lan;;
+  foreign_map) DB_network_ip4map_TYPE=interface; DB_network_ip4map_proto=map; DB_network_ip4map_maptype=map-e; DB_network_ip4map_tunlink=other6;;
+  wrong_type) DB_network_ip4map_TYPE=device;;
+  same) DB_jp_ipoe_config_mape_iface=access6;;
+  bad_name) DB_jp_ipoe_config_mape_iface='@interface[0]';;
+ esac
+ for cmd in cmd_start cmd_stop cmd_repair cmd_boot; do
+  "$cmd" force && fail "accepted $scenario via $cmd"
+ done
+done
+exit 0
+`, setup + customZones + `
+DB_network_wan_TYPE=interface
+DB_network_wan_proto=pppoe
+DB_network_lan_TYPE=interface
+DB_network_lan_proto=static
+`);
+
+  run('interface roles: reuse only matching MAP-E; absent targets allowed only for teardown', `
+DB_network_ip4map_TYPE=interface
+DB_network_ip4map_proto=map
+DB_network_ip4map_maptype=map-e
+DB_network_ip4map_tunlink=access6
+validate_interface_roles || fail matching-map
+for field in proto maptype tunlink; do
+ eval "saved=\\\"\\\${DB_network_ip4map_$field}\\\""
+ eval "DB_network_ip4map_$field=''"
+ validate_interface_roles && fail "accepted empty $field"
+ eval "DB_network_ip4map_$field=\\\"$saved\\\""
+done
+DB_network_ip4map_TYPE=''
+validate_interface_roles || fail new-map
+DB_network_access6_TYPE=''
+validate_interface_roles && fail missing-wan6
+validate_interface_roles stop || fail already-stopped
+config_load() { return 1; }
+validate_interface_roles stop && fail unreadable-config
+exit 0
+`, setup + customZones);
 
   run('Apply comparisons: changed/absent options are not confused with a saved fingerprint', `
 uci() { [ "$1 $2" = '-q get' ] || fail mutation; case "$3" in

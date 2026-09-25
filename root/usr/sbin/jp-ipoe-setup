@@ -793,32 +793,47 @@ fail_start() {
 	return 1
 }
 
+# Names alone do not confer ownership. Reuse only a DHCPv6 uplink and a
+# matching MAP-E section; never convert LAN, PPPoE or an unrelated tunnel.
+validate_interface_roles() {
+	local iface kind proto maptype tunlink
+	for iface in "$WAN6_IFACE" "$MAPE_IFACE"; do
+		case "$iface" in
+			''|lan|*[!a-zA-Z0-9_]*) log_err "Unsafe managed interface name: $iface"; return 1 ;;
+		esac
+	done
+	[ "$WAN6_IFACE" != "$MAPE_IFACE" ] || {
+		log_err "WAN6 and MAP-E interface names must differ."
+		return 1
+	}
+	config_load network || { log_err "Cannot read network configuration."; return 1; }
+	config_get kind "$WAN6_IFACE" TYPE ""
+	config_get proto "$WAN6_IFACE" proto ""
+	if [ -z "$kind" ] && [ "$1" = stop ]; then
+		: # Teardown after WAN6 was already removed must remain possible.
+	elif [ "$kind" != interface ] || [ "$proto" != dhcpv6 ]; then
+		log_err "WAN6 interface $WAN6_IFACE must be an existing DHCPv6 interface; refusing to overwrite it."
+		return 1
+	fi
+	config_get kind "$MAPE_IFACE" TYPE ""
+	[ -n "$kind" ] || return 0
+	config_get proto "$MAPE_IFACE" proto ""
+	config_get maptype "$MAPE_IFACE" maptype ""
+	config_get tunlink "$MAPE_IFACE" tunlink ""
+	[ "$kind" = interface ] && [ "$proto" = map ] &&
+		[ "$maptype" = map-e ] && [ "$tunlink" = "$WAN6_IFACE" ] || {
+		log_err "Interface $MAPE_IFACE is not a matching MAP-E interface; refusing to take ownership."
+		return 1
+	}
+}
+
 validate_config() {
 	[ -n "$WAN_DEVICE" ] || {
 		log_err "WAN physical device is not configured."
 		return 1
 	}
 
-	[ -n "$WAN6_IFACE" ] || {
-		log_err "WAN6 interface name is not configured."
-		return 1
-	}
-
-	if ! uci -q get network."$WAN6_IFACE" >/dev/null 2>&1; then
-		log_err "WAN6 interface $WAN6_IFACE does not exist. Please create it before starting JP IPoE."
-		return 1
-	fi
-
-	[ -n "$MAPE_IFACE" ] || {
-		log_err "MAP-E interface name is not configured."
-		return 1
-	}
-
-	if [ "$MAPE_IFACE" = "$WAN6_IFACE" ]; then
-		log_err "MAP-E interface name ($MAPE_IFACE) must differ from the WAN6 interface; refusing to overwrite WAN6."
-		return 1
-	fi
-
+	validate_interface_roles || return 1
 	resolve_ipoe_firewall_zone "$WAN6_IFACE" "$MAPE_IFACE" >/dev/null
 }
 
@@ -1115,6 +1130,7 @@ cmd_stop() {
 		find_firewall_zone "" "$iface" >/dev/null; rc=$?
 		[ "$rc" -ne 2 ] || return 1
 	done
+	validate_interface_roles stop || return 1
 	log "Stopping JP IPoE interfaces..."
 	teardown_managed_ipoe || return 1
 	log "Done."
