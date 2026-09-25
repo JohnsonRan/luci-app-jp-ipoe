@@ -99,6 +99,18 @@ the tunnel. MAP-E MTU is `1460`; PPPoE fallback metric is `200`. A failed apply
 after network changes tears down managed MAP-E state; it is not a full restore
 of the user's previous configuration.
 
+Firewall selection is read-only until ownership is validated. Prefer WAN6's
+existing unique zone, then the `wan` network's zone, then a uniquely named
+`wan` zone. `resolve_ipoe_firewall_zone()` rejects ambiguous membership or an
+existing MAP interface in another zone; normal startup checks this before
+installing the handler or writing network configuration, and firewall setup
+rechecks before adding membership. Stop checks for ambiguous WAN6/MAP membership
+before teardown; repair and boot abort if stop is refused. Cleanup removes MAP
+membership only from its actual zone. PPPoE fallback selection is confined to
+the selected WAN zone, not interfaces merely named `wan` or `pppoe-wan`.
+These guards preserve configuration boundaries; they do not add multi-WAN or
+multi-LAN support, or serialize external UCI edits.
+
 `repair` deliberately uses managed stop/start and bypasses the shortcut.
 When boot startup is enabled, `boot` first stops managed IPoE and WAN PPPoE
 interfaces, restarts WAN6, then forces the full pipeline. Ordinary full setup
@@ -244,8 +256,9 @@ From the repository root, with Node.js and POSIX `sh`/`awk` available:
 node tests/port-forwarding.cjs
 ```
 
-No npm dependencies are required. These tests mock OpenWrt services; they do
-not establish live netifd/fw4 or Internet behavior.
+No npm dependencies are required. Tests include relay/server-mode startup and
+custom/ambiguous firewall ownership, cleanup and PPPoE scoping. These tests mock
+OpenWrt services; they do not establish live netifd/fw4 or Internet behavior.
 
 ### Native kernel checks
 

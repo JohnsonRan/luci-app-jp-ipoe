@@ -49,9 +49,8 @@ firewall_zone_find_by_name_cb() {
 	local target_name="$2"
 	local section_name
 
-	[ -n "$FIREWALL_ZONE_MATCH" ] && return 0
 	config_get section_name "$section" name ""
-	[ "$section_name" = "$target_name" ] && FIREWALL_ZONE_MATCH="$section"
+	[ "$section_name" = "$target_name" ] && append FIREWALL_ZONE_MATCH "$section"
 }
 
 firewall_zone_find_by_network_cb() {
@@ -59,44 +58,52 @@ firewall_zone_find_by_network_cb() {
 	local target_network="$2"
 	local networks
 
-	[ -n "$FIREWALL_ZONE_MATCH" ] && return 0
 	config_get networks "$section" network ""
-	list_contains networks "$target_network" && FIREWALL_ZONE_MATCH="$section"
+	list_contains networks "$target_network" && append FIREWALL_ZONE_MATCH "$section"
 }
 
+# Read-only: existing network membership wins over a conventional zone name.
+# Return 1 for no match, 2 for ambiguity; an empty name disables name fallback.
 find_firewall_zone() {
-	local target_name="${1:-wan}"
-	local primary_network="$2"
-	local secondary_network="$3"
+	local target_name="${1-wan}"
+	local target_network
 
 	config_load firewall
+	for target_network in "$2" "$3"; do
+		[ -n "$target_network" ] || continue
+		FIREWALL_ZONE_MATCH=""
+		config_foreach firewall_zone_find_by_network_cb zone "$target_network"
+		case "$FIREWALL_ZONE_MATCH" in
+			*' '*) log_err "Interface $target_network belongs to multiple firewall zones; refusing to guess."; return 2 ;;
+			?*) printf '%s' "$FIREWALL_ZONE_MATCH"; return 0 ;;
+		esac
+	done
 
+	[ -n "$target_name" ] || return 1
 	FIREWALL_ZONE_MATCH=""
 	config_foreach firewall_zone_find_by_name_cb zone "$target_name"
-	[ -n "$FIREWALL_ZONE_MATCH" ] && {
-		printf '%s' "$FIREWALL_ZONE_MATCH"
-		return 0
-	}
-
-	if [ -n "$primary_network" ]; then
-		FIREWALL_ZONE_MATCH=""
-		config_foreach firewall_zone_find_by_network_cb zone "$primary_network"
-		[ -n "$FIREWALL_ZONE_MATCH" ] && {
-			printf '%s' "$FIREWALL_ZONE_MATCH"
-			return 0
-		}
-	fi
-
-	if [ -n "$secondary_network" ]; then
-		FIREWALL_ZONE_MATCH=""
-		config_foreach firewall_zone_find_by_network_cb zone "$secondary_network"
-		[ -n "$FIREWALL_ZONE_MATCH" ] && {
-			printf '%s' "$FIREWALL_ZONE_MATCH"
-			return 0
-		}
-	fi
-
+	case "$FIREWALL_ZONE_MATCH" in
+		*' '*) log_err "Multiple firewall zones are named $target_name; refusing to guess."; return 2 ;;
+		?*) printf '%s' "$FIREWALL_ZONE_MATCH"; return 0 ;;
+	esac
 	return 1
+}
+
+# Resolve and validate ownership before any interface/zone writes. Never move
+# an existing MAP interface between zones or give it a second membership.
+resolve_ipoe_firewall_zone() {
+	local wan_zone mape_zone rc
+	wan_zone="$(find_firewall_zone wan "$1" wan)" || {
+		log_err "Cannot determine a unique WAN firewall zone for $1."
+		return 1
+	}
+	mape_zone="$(find_firewall_zone "" "$2")"; rc=$?
+	[ "$rc" -ne 2 ] || return 1
+	if [ -n "$mape_zone" ] && [ "$mape_zone" != "$wan_zone" ]; then
+		log_err "MAP-E interface $2 already belongs to a different firewall zone; refusing to reassign it."
+		return 1
+	fi
+	printf '%s' "$wan_zone"
 }
 
 get_firewall_zone_networks() {
@@ -134,17 +141,10 @@ find_wan_pppoe_sections() {
 	sections="$(find_pppoe_sections)"
 	[ -n "$sections" ] || return 0
 
-	wan_zone="$(find_firewall_zone "wan" "$WAN6_IFACE" "wan")"
-	[ -n "$wan_zone" ] && wan_zone_networks="$(get_firewall_zone_networks "$wan_zone")"
+	wan_zone="$(find_firewall_zone "wan" "$WAN6_IFACE" "wan")" || return 1
+	wan_zone_networks="$(get_firewall_zone_networks "$wan_zone")"
 
 	for section in $sections; do
-		case "$section" in
-			wan|pppoe-wan)
-				append matches "$section"
-				continue
-				;;
-		esac
-
 		[ -n "$wan_zone_networks" ] || continue
 		list_contains wan_zone_networks "$section" || continue
 		append matches "$section"
@@ -512,12 +512,7 @@ setup_firewall() {
 
 	log "Configuring firewall zones..."
 
-	wan_zone="$(find_firewall_zone "wan" "$wan6_iface" "wan")"
-
-	if [ -z "$wan_zone" ]; then
-		log_err "Could not find WAN firewall zone"
-		return 1
-	fi
+	wan_zone="$(resolve_ipoe_firewall_zone "$wan6_iface" "$mape_iface")" || return 1
 
 	# Add wan6 and mape to WAN zone if not already there
 	config_load firewall
@@ -539,7 +534,7 @@ setup_pppoe_fallback_metrics() {
 	local section
 	local sections_to_update
 
-	sections_to_update="$(find_wan_pppoe_sections)"
+	sections_to_update="$(find_wan_pppoe_sections)" || return 1
 	[ -n "$sections_to_update" ] || return 0
 
 	for section in $sections_to_update; do
@@ -559,7 +554,7 @@ stop_pppoe_fallback_interfaces() {
 		return 1
 	}
 
-	setup_pppoe_fallback_metrics
+	setup_pppoe_fallback_metrics || return 1
 
 	for section in $pppoe_sections; do
 		log "Stopping PPPoE fallback interface $section before WAN6 restart."
@@ -688,13 +683,14 @@ configure_dhcpv6_relay() {
 	uci commit dhcp
 	/etc/init.d/odhcpd restart 2>/dev/null || true
 	[ "$enabled" = "1" ] && log "DHCPv6 Relay configured successfully."
+	return 0
 }
 
 recover_wan6_after_pppoe_conflict() {
 	local wan6_iface="$1"
 	local pppoe_sections
 
-	pppoe_sections="$(find_wan_pppoe_sections)"
+	pppoe_sections="$(find_wan_pppoe_sections)" || return 1
 	[ -n "$pppoe_sections" ] || {
 		log "WAN6 recovery skipped; no WAN PPPoE fallback interface found."
 		return 1
@@ -733,9 +729,12 @@ stop_managed_interfaces() {
 
 remove_firewall_network() {
 	local mape_iface="$1"
-	local wan_zone
+	local wan_zone rc
 
-	wan_zone="$(find_firewall_zone "wan" "$WAN6_IFACE" "$mape_iface")" || return 0
+	# Withdraw only from the MAP interface's actual zone, never a name fallback.
+	wan_zone="$(find_firewall_zone "" "$mape_iface")"; rc=$?
+	[ "$rc" -ne 1 ] || return 0
+	[ "$rc" -eq 0 ] || return 1
 	uci del_list firewall."$wan_zone".network="$mape_iface" 2>/dev/null || true
 	uci commit firewall
 	fw4 reload 2>/dev/null || true
@@ -760,7 +759,7 @@ remove_mape_config() {
 }
 
 remove_managed_config() {
-	remove_firewall_network "$MAPE_IFACE"
+	remove_firewall_network "$MAPE_IFACE" || return 1
 	remove_mape_config "$MAPE_IFACE"
 }
 
@@ -779,7 +778,7 @@ remove_managed_wan6_state() {
 
 teardown_managed_ipoe() {
 	stop_managed_interfaces
-	remove_managed_config
+	remove_managed_config || return 1
 	remove_managed_wan6_state
 }
 
@@ -819,6 +818,8 @@ validate_config() {
 		log_err "MAP-E interface name ($MAPE_IFACE) must differ from the WAN6 interface; refusing to overwrite WAN6."
 		return 1
 	fi
+
+	resolve_ipoe_firewall_zone "$WAN6_IFACE" "$MAPE_IFACE" >/dev/null
 }
 
 apply_map_protocol() {
@@ -1016,7 +1017,7 @@ network.$MAPE_IFACE.offset $OFFSET
 EOF
 	# An opaque custom rule/PSID bypasses these bounds; do not guess equivalence.
 	option_matches "network.$MAPE_IFACE.rule" "" && option_matches "network.$MAPE_IFACE.psid" "" || return 1
-	wan_zone="$(find_firewall_zone wan "$WAN6_IFACE" wan)" || return 1
+	wan_zone="$(resolve_ipoe_firewall_zone "$WAN6_IFACE" "$MAPE_IFACE")" || return 1
 	networks="$(get_firewall_zone_networks "$wan_zone")"
 	list_contains networks "$WAN6_IFACE" && list_contains networks "$MAPE_IFACE" || return 1
 	for section in $(find_wan_pppoe_sections); do
@@ -1105,25 +1106,32 @@ cmd_start() {
 
 # Stop / teardown
 cmd_stop() {
+	local iface rc
 	jp_ipoe_config_load
 
+	# Check both owned interfaces before ifdown or any cleanup writes. Missing
+	# membership is normal after a partial stop; ambiguous ownership is not.
+	for iface in "$WAN6_IFACE" "$MAPE_IFACE"; do
+		find_firewall_zone "" "$iface" >/dev/null; rc=$?
+		[ "$rc" -ne 2 ] || return 1
+	done
 	log "Stopping JP IPoE interfaces..."
-	teardown_managed_ipoe
+	teardown_managed_ipoe || return 1
 	log "Done."
 }
 
 # Explicit recovery uses the existing stop/start path, even if UCI is unchanged.
 cmd_repair() {
-	cmd_stop
+	cmd_stop || return 1
 	cmd_start force
 }
 
 cmd_boot() {
 	local pppoe_sections
 
-	cmd_stop
+	cmd_stop || return 1
 
-	pppoe_sections="$(find_wan_pppoe_sections)"
+	pppoe_sections="$(find_wan_pppoe_sections)" || return 1
 	if [ -n "$pppoe_sections" ]; then
 		stop_pppoe_fallback_interfaces "$pppoe_sections" || true
 	else

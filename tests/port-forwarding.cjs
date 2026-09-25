@@ -429,6 +429,138 @@ done
 `, command);
 
   const setup = stripSources(read('root/usr/sbin/jp-ipoe-setup')).split('# Entry point')[0];
+  run('DHCP modes: relay and PD server mode both reach tunnel bringup without rollback', `
+uci() { printf '%s\\n' "$*" >> "$TEST_TMP/dhcp-log"; }
+odhcpd_mock() { [ "$1" = restart ] || fail service-action; }
+validate_config() { :; }
+apply_map_protocol() { :; }
+apply_network_config() { :; }
+apply_firewall_config() { :; }
+bringup_mape() { BROUGHT_UP=1; }
+rollback_failed_start() { fail unexpected-rollback; }
+WAN6_IFACE=access6
+for DHCPV6_RELAY in 1 0; do
+ : > "$TEST_TMP/dhcp-log"
+ BROUGHT_UP=0
+ run_start_pipeline || fail "DHCP mode $DHCPV6_RELAY"
+ [ "$BROUGHT_UP" = 1 ] || fail missing-bringup
+ if [ "$DHCPV6_RELAY" = 1 ]; then lan_mode=relay; wan_mode=relay; else lan_mode=server; wan_mode=disabled; fi
+ for option in ra dhcpv6; do
+  grep -Fxq "set dhcp.lan.$option=$lan_mode" "$TEST_TMP/dhcp-log" || fail lan-mode
+  grep -Fxq "set dhcp.access6.$option=$wan_mode" "$TEST_TMP/dhcp-log" || fail wan-mode
+ done
+ grep -Fxq 'commit dhcp' "$TEST_TMP/dhcp-log" || fail missing-commit
+done
+`, setup.replaceAll('/etc/init.d/odhcpd', 'odhcpd_mock'));
+
+  const customZones = `
+DB_firewall_sections='wan lan uplink'
+DB_firewall_wan_network=wan
+DB_firewall_uplink_TYPE=zone
+DB_firewall_uplink_name=uplink
+DB_firewall_uplink_network=access6
+DB_jp_ipoe_config_wan6_iface=access6
+DB_jp_ipoe_config_mape_iface=ip4map
+WAN_DEVICE=eth0
+WAN6_IFACE=access6
+MAPE_IFACE=ip4map
+`;
+  run('zone lookup: membership before names, explicit fallback, no guessing on ambiguity', `
+uci() { fail unexpected-mutation; }
+[ "$(find_firewall_zone wan access6 wan)" = uplink ] || fail custom-zone
+[ "$(find_firewall_zone wan absent wan)" = wan ] || fail network-fallback
+[ "$(find_firewall_zone wan absent '')" = wan ] || fail name-fallback
+result="$(find_firewall_zone '' absent '')"; rc=$?
+[ "$rc" = 1 ] && [ -z "$result" ] || fail missing-not-ambiguous
+DB_firewall_wan_network='wan access6'
+result="$(find_firewall_zone wan access6 wan)"; rc=$?
+[ "$rc" = 2 ] && [ -z "$result" ] || fail ambiguous-primary
+DB_firewall_wan_network=wan
+DB_firewall_uplink_network='access6 wan'
+result="$(find_firewall_zone wan absent wan)"; rc=$?
+[ "$rc" = 2 ] && [ -z "$result" ] || fail ambiguous-fallback
+DB_firewall_uplink_name=wan
+result="$(find_firewall_zone wan absent '')"; rc=$?
+[ "$rc" = 2 ] && [ -z "$result" ] || fail duplicate-name
+`, setup + customZones);
+
+  const zoneWrites = run('firewall setup: add MAP only to the existing WAN6 zone', `
+uci() { printf 'WRITE %s\\n' "$*"; }
+setup_firewall access6 ip4map || fail setup
+`, setup + customZones);
+  assert.match(zoneWrites, /^WRITE add_list firewall.uplink.network=ip4map$/m);
+  assert.doesNotMatch(zoneWrites, /firewall\.wan\.|network=access6/);
+
+  run('ownership preflight: ambiguous WAN/MAP or foreign MAP zone rejects setup before writes', `
+uci() { [ "$*" = '-q get network.access6' ] || fail "unexpected UCI $*"; echo interface; }
+apply_map_protocol() { fail installer-before-validation; }
+for scenario in wan_ambiguous map_ambiguous map_foreign; do
+ DB_firewall_wan_network=wan
+ DB_firewall_uplink_network=access6
+ case "$scenario" in
+  wan_ambiguous) DB_firewall_wan_network='wan access6';;
+  map_ambiguous) DB_firewall_wan_network='wan ip4map'; DB_firewall_uplink_network='access6 ip4map';;
+  map_foreign) DB_firewall_wan_network='wan ip4map';;
+ esac
+ setup_firewall access6 ip4map && fail "unsafe firewall setup $scenario"
+ run_start_pipeline && fail "unsafe startup $scenario"
+done
+exit 0
+`, setup + customZones);
+
+  run('stop, repair and boot: ambiguous ownership aborts before teardown or restart', `
+uci() { fail unexpected-mutation; }
+ifdown() { fail unexpected-ifdown; }
+cmd_start() { fail start-after-refused-stop; }
+restart_wan6_interface() { fail restart-after-refused-stop; }
+for iface in access6 ip4map; do
+ DB_firewall_wan_network="wan $iface"
+ DB_firewall_uplink_network="access6 $iface"
+ cmd_stop && fail ambiguous-stop
+ cmd_repair && fail ambiguous-repair
+ cmd_boot && fail ambiguous-boot
+done
+exit 0
+`, setup + customZones);
+
+  const cleanupWrites = run('firewall cleanup: use actual MAP zone; missing is safe, ambiguous is refused', `
+DB_firewall_wan_network='wan access6'
+DB_firewall_uplink_network=ip4map
+uci() { printf 'WRITE %s\\n' "$*"; }
+fw4() { :; }
+remove_firewall_network ip4map || fail cleanup
+uci() { fail unexpected-mutation; }
+DB_firewall_uplink_network=''
+remove_firewall_network ip4map || fail already-removed
+DB_firewall_uplink_network=ip4map
+DB_firewall_wan_network='wan access6 ip4map'
+remove_mape_config() { fail delete-after-refused-withdrawal; }
+remove_managed_config && fail ambiguous-cleanup
+exit 0
+`, setup + customZones);
+  assert.match(cleanupWrites, /^WRITE del_list firewall.uplink.network=ip4map$/m);
+  assert.doesNotMatch(cleanupWrites, /firewall\.wan\./);
+
+  const metricWrites = run('PPPoE fallback: scope by selected WAN zone, not a conventional interface name', `
+DB_network_sections='wan backup access6'
+DB_network_wan_TYPE=interface
+DB_network_wan_proto=pppoe
+DB_network_backup_TYPE=interface
+DB_network_backup_proto=pppoe
+DB_network_access6_TYPE=interface
+DB_network_access6_proto=dhcpv6
+DB_firewall_uplink_network='access6 backup'
+[ "$(find_wan_pppoe_sections)" = backup ] || fail unrelated-pppoe
+uci() { printf 'WRITE %s\\n' "$*"; }
+setup_pppoe_fallback_metrics || fail metrics
+uci() { fail mutation-after-ambiguous-zone; }
+DB_firewall_wan_network='wan access6'
+setup_pppoe_fallback_metrics && fail ignored-ambiguity
+exit 0
+`, setup + customZones);
+  assert.match(metricWrites, /^WRITE set network.backup.metric=200$/m);
+  assert.doesNotMatch(metricWrites, /network\.wan\.metric/);
+
   run('Apply comparisons: changed/absent options are not confused with a saved fingerprint', `
 uci() { [ "$1 $2" = '-q get' ] || fail mutation; case "$3" in
  network.test.mtu) echo 1460;; network.test.proto) echo map;; *) return 1;; esac; }
