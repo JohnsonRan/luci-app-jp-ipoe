@@ -571,25 +571,32 @@ stop_pppoe_fallback_interfaces() {
 
 start_pppoe_fallback_interfaces() {
 	local pppoe_sections="$1"
-	local section
+	local section rc=0
 
 	[ -n "$pppoe_sections" ] || return 0
 
 	for section in $pppoe_sections; do
 		log "Starting PPPoE fallback interface $section after JP IPoE startup."
-		ifup "$section" 2>/dev/null || log_err "Failed to start PPPoE fallback interface $section."
+		ifup "$section" 2>/dev/null || {
+			log_err "Failed to start PPPoE fallback interface $section."
+			rc=1
+		}
 	done
+	return "$rc"
 }
 
 # Restart any PPPoE fallback interface this run stopped (e.g. during WAN6 IPv6
 # recovery) so the line always regains a working IPv4 fallback, regardless of
 # whether IPoE setup ultimately succeeded.
 restore_stopped_pppoe_fallback() {
+	local rc
 	[ -n "$JP_IPOE_STOPPED_PPPOE" ] || return 0
 
 	log "Restoring previously stopped PPPoE fallback interface(s): $JP_IPOE_STOPPED_PPPOE"
 	start_pppoe_fallback_interfaces "$JP_IPOE_STOPPED_PPPOE"
+	rc=$?
 	JP_IPOE_STOPPED_PPPOE=""
+	return "$rc"
 }
 
 restart_wan6_interface() {
@@ -1179,6 +1186,16 @@ cmd_boot() {
 # killed operation must not strand every later run -- including the boot
 # recovery. The recorded holder PID is checked with kill -0, so a dead holder
 # is broken automatically and a live one is named in the abort message.
+cleanup_locked() {
+	local rc=0
+	# A second signal must not unlock while fallback recovery is still running.
+	trap '' INT TERM HUP
+	restore_stopped_pppoe_fallback || rc=1
+	rm -rf "$LOCK_DIR" || rc=1
+	trap - EXIT INT TERM HUP
+	return "$rc"
+}
+
 run_locked() {
 	local rc
 	local holder=""
@@ -1201,20 +1218,19 @@ run_locked() {
 		elapsed=$((elapsed + 1))
 	done
 
-	echo "$$" > "$LOCK_DIR/pid" 2>/dev/null
-	trap 'rm -rf "$LOCK_DIR"' EXIT INT TERM HUP
+	# EXIT is the only signal cleanup path: signals terminate instead of
+	# merely dropping the lock and continuing the interrupted operation.
+	trap 'rc=$?; cleanup_locked || { [ "$rc" -ne 0 ] || rc=1; }; exit "$rc"' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	trap 'exit 129' HUP
+	echo "$$" > "$LOCK_DIR/pid" 2>/dev/null || { cleanup_locked; return 1; }
 
 	"$@"
 	rc=$?
 
-	# Always restore PPPoE fallback interfaces stopped during this operation
-	# (WAN6 recovery or boot), on both success (they coexist as a
-	# lower-priority fallback) and failure (the line keeps working IPv4
-	# connectivity instead of losing it entirely). Restoring here, rather than
-	# inside each command, guarantees no locked operation can exit with the
-	# fallback left down. The lock dir is removed by the EXIT trap.
-	restore_stopped_pppoe_fallback
-
+	# Restore under the lock on normal success/failure as well as trapped exit.
+	cleanup_locked || { [ "$rc" -ne 0 ] || rc=1; }
 	return "$rc"
 }
 

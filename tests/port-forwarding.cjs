@@ -781,6 +781,52 @@ done
 `, setup);
   assert.equal((locked.match(/RESTORE/g) || []).length, 2);
 
+  for (const [signal, code] of [['HUP', 129], ['INT', 130], ['TERM', 143]]) {
+    const lock = tmp + '/signal-lock-' + signal;
+    const result = cp.spawnSync('sh', ['-s'], {
+      cwd: root, encoding: 'utf8', input: mocks + '\n' + library + '\n' + setup + `
+LOCK_DIR='${lock}'
+restore_stopped_pppoe_fallback() {
+ [ -d "$LOCK_DIR" ] || fail unlocked-before-restore
+ echo RESTORE
+ kill -${signal} $$
+ echo RESTORED
+}
+operation() { kill -${signal} $$; echo UNSAFE_CONTINUE; }
+run_locked operation
+echo UNSAFE_RETURN
+`
+    });
+    assert.equal(result.status, code, result.stdout + result.stderr);
+    assert.match(result.stdout, /RESTORE\nRESTORED/);
+    assert.doesNotMatch(result.stdout, /UNSAFE/);
+    assert(!fs.existsSync(lock), 'lock removed only after signal cleanup');
+  }
+  const foregroundSignal = cp.spawnSync('sh', ['-s'], {
+    cwd: root, encoding: 'utf8', input: mocks + '\n' + library + '\n' + setup + `
+LOCK_DIR='${tmp}/foreground-signal-lock'
+restore_stopped_pppoe_fallback() { echo RESTORE; }
+operation() {
+ sh -c 'kill -TERM "$1"; sleep 1; [ -d "$2" ] || exit 1; echo CHILD_DONE' sh "$$" "$LOCK_DIR"
+ echo UNSAFE_CONTINUE
+}
+run_locked operation
+`
+  });
+  assert.equal(foregroundSignal.status, 143, foregroundSignal.stdout + foregroundSignal.stderr);
+  assert.match(foregroundSignal.stdout, /^CHILD_DONE\nRESTORE\n$/);
+  assert(!fs.existsSync(tmp + '/foreground-signal-lock'));
+  console.log('PASS HUP/INT/TERM terminate mutation, wait for foreground child, and hold lock through restoration');
+
+  run('locked restoration failure is reported and cleanup releases the lock', `
+LOCK_DIR="$TEST_TMP/restore-failure-lock"
+operation() { :; }
+JP_IPOE_STOPPED_PPPOE=wan
+ifup() { return 1; }
+run_locked operation && fail hidden-restore-failure
+[ ! -d "$LOCK_DIR" ] || fail leftover-lock
+`, setup);
+
   run('IPv6 destinations: canonical LAN GUA only; reject local, WAN, via and invalid input', `
 network_get_device() { export "$1=br-lan"; }
 ip() { printf '%s\\n' "$ROUTE"; }
