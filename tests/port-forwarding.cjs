@@ -14,7 +14,8 @@ const command = stripSources(read('root/usr/libexec/jp-ipoe-forward')).split('\n
   .replaceAll('/proc/sys/kernel/random/uuid', tmp + '/uuid');
 const nft = stripSources(read('root/usr/libexec/jp-ipoe-map-nft')).split('\ncase "$1" in')[0];
 const info = stripSources(read('root/usr/libexec/jp-ipoe-info')).split('\ncase "$1" in')[0]
-  .replaceAll('/proc/sys/net/netfilter/', tmp + '/netfilter/');
+  .replaceAll('/proc/sys/net/netfilter/', tmp + '/netfilter/')
+  .replaceAll('/tmp/map-', tmp + '/map-');
 let count = 0;
 
 // config_load deliberately replaces current sections, as on OpenWrt. This
@@ -187,6 +188,19 @@ jp_ipoe_info_status wan6 wan6mape 2001:db8::1
   assert.match(partialStatus, /^mape_state=up$/m);
   assert.match(partialStatus, /^wan6_ipv6=2001:db8::\/64$/m);
   assert.match(partialStatus, /^insert_failed=$/m);
+
+  for (const [bmr, expected] of [['2', '2000-2015 3000-3015'], ['9', '1000-1015'], ['', '1000-1015']]) {
+    fs.writeFileSync(tmp + '/map-wan6mape.rules', 'rule=type=map-e\n' +
+      `RULE_1_PORTSETS='1000-1015'\nRULE_2_PORTSETS='2000-2015 3000-3015'\n` +
+      (bmr ? `RULE_BMR=${bmr}\n` : ''));
+    const status = run('status portsets: BMR ' + (bmr || 'default'), `
+uci() { return 1; }
+conntrack() { return 1; }
+jp_ipoe_info_status wan6 wan6mape ''
+`, info);
+    assert.match(status, new RegExp('^port_info=' + expected + '$', 'm'));
+  }
+  fs.unlinkSync(tmp + '/map-wan6mape.rules');
 
   run('reservation union preserves manual ports and interface scope', `
 jp_forward_reserved wan6mape

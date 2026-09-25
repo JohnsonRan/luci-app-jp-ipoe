@@ -73,7 +73,7 @@ jp_ipoe_info_status() {
 	local ipv6_addr=""
 	local mape_ip4=""
 	local mape_state="down"
-	local port_info=""
+	local port_info="" rule_data
 	local pppoe_fallback_metrics=""
 	local pppoe_sections=""
 	local pppoe_section
@@ -92,7 +92,10 @@ jp_ipoe_info_status() {
 	[ -n "$runtime_br_addr" ] && br_addr="$runtime_br_addr"
 
 	if [ -f "/tmp/map-${mape_iface}.rules" ]; then
-		port_info="$(awk '/PORTSETS/ { sub(/.*PORTSETS=/, ""); sub(/RULE_.*/, ""); print; exit }' "/tmp/map-${mape_iface}.rules")"
+		# The first line stores the input rule; remaining lines are mapcalc output.
+		if rule_data="$(sed '1d' "/tmp/map-${mape_iface}.rules")"; then
+			port_info="$(jp_ipoe_mapcalc_lookup "$rule_data" PORTSETS)"
+		fi
 	fi
 
 	pppoe_sections="$(find_pppoe_sections)"
