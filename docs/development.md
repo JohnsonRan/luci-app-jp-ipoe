@@ -106,8 +106,19 @@ The full pipeline validates configuration and the installed MAP handler,
 configures WAN6 and its DUID, waits for IPv6, resolves automatic parameters if
 enabled, creates MAP-E, updates the WAN zone and LAN IPv6 mode, then brings up
 the tunnel. MAP-E MTU is `1460`; PPPoE fallback metric is `200`. A failed apply
-after network changes tears down managed MAP-E state; it is not a full restore
-of the user's previous configuration.
+after network changes attempts to tear down managed MAP-E state; it is not a full
+restore of the user's previous configuration. Required UCI writes, commits,
+ifup, odhcpd restart and fw4 reload failures must not be hidden by later logs.
+A section newly created by this invocation can be removed even if its initial
+options were only partly written. If cleanup itself fails, report partial state;
+never claim the router was restored.
+
+`validate_interface_roles()` rejects unsafe/equal names, LAN, a WAN6 that is not
+an existing DHCPv6 interface, and a MAP name already used by an unrelated
+section/protocol/tunnel. An existing MAP section must use `map-e` and link to
+the selected WAN6. Stop applies the same role guards, permitting an already
+missing WAN6. These checks intentionally refuse ambiguous legacy partial state
+rather than guessing ownership.
 
 Firewall selection is read-only until ownership is validated. Prefer WAN6's
 existing unique zone, then the `wan` network's zone, then a uniquely named
@@ -126,9 +137,11 @@ When boot startup is enabled, `boot` first stops managed IPoE and WAN PPPoE
 interfaces, restarts WAN6, then forces the full pipeline. Ordinary full setup
 can also stop PPPoE and retry WAN6 if initial IPv6 acquisition fails. After a
 locked operation returns, `run_locked()` attempts to restore its stopped PPPoE
-interfaces on both success and failure, while preserving the operation's exit
-status. Abrupt termination or a failed restoration is not covered by a success
-guarantee. Do not make ordinary Apply perform the unconditional boot recovery
+interfaces while still holding the lock, on both success and failure. INT, TERM
+and HUP terminate the operation and use the same cleanup path; repeated signals
+during restoration are ignored. A restoration failure changes an otherwise
+successful result to failure. SIGKILL, power loss and a failed restoration are
+not covered by a recovery guarantee. Do not make ordinary Apply perform the unconditional boot recovery
 sequence.
 
 ### WAN6 identity and MAP parameters
@@ -199,7 +212,10 @@ same reservation-before-publication order when rebuilding an interface.
 Deletion withdraws DNAT before releasing the saved reservation. An unconfirmed
 rollback retains saved state/reservations and reports possible active access;
 a failed SNAT refresh can leave an extra reservation rather than risk a collision.
-Neither path restarts the tunnel nor flushes conntrack. Existing sessions may
+Even stale UCI allocations require readable netifd state before deleting saved
+rules. A failed/unknown interface query retains the saved record; it is not
+interpreted as an offline interface. Neither path restarts the tunnel nor
+flushes conntrack. Existing sessions may
 continue after deletion. Rules bind to public IPv4 plus external port;
 incompatible allocations or local conflicts suspend them instead of reassigning
 them silently. NAT loopback/reflection is not provided.
