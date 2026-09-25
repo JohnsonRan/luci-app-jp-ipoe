@@ -537,3 +537,18 @@ msgstr "连接跟踪提前回收"
 
 msgid "Conntrack covers the whole router. Failure/eviction counters are cumulative, not MAP-E port usage or Internet loss. Unavailable is not zero."
 msgstr "连接跟踪统计覆盖全路由器；失败/回收为累计值，不代表 MAP-E 端口用量或公网丢包。无法读取不等于零。"
+
+msgid "You do not have permission to change IPoE settings."
+msgstr "您没有权限修改 IPoE 设置。"
+
+msgid "Failed to save IPoE settings; nothing was applied."
+msgstr "保存 IPoE 设置失败，未应用任何更改。"
+
+msgid "Failed to commit jp_ipoe configuration; IPoE was not re-applied."
+msgstr "提交 jp_ipoe 配置失败，未重新应用 IPoE。"
+
+msgid "Failed to save BR address; nothing was applied."
+msgstr "保存 BR 地址失败，未应用任何更改。"
+
+msgid "Read-only access: adding and deleting forwards is disabled."
+msgstr "只读访问：添加和删除端口转发已禁用。"

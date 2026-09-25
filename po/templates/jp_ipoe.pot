@@ -527,3 +527,18 @@ msgstr ""
 
 msgid "Conntrack covers the whole router. Failure/eviction counters are cumulative, not MAP-E port usage or Internet loss. Unavailable is not zero."
 msgstr ""
+
+msgid "You do not have permission to change IPoE settings."
+msgstr ""
+
+msgid "Failed to save IPoE settings; nothing was applied."
+msgstr ""
+
+msgid "Failed to commit jp_ipoe configuration; IPoE was not re-applied."
+msgstr ""
+
+msgid "Failed to save BR address; nothing was applied."
+msgstr ""
+
+msgid "Read-only access: adding and deleting forwards is disabled."
+msgstr ""

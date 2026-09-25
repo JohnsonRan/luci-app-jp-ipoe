@@ -1190,7 +1190,19 @@ done
   let modal, notifications = 0, executions = 0;
   const messages = [], elements = {};
   let executeCommand = () => { executions++; throw new Error('Unexpected duplicate submission'); };
-  const view = new Function('view', 'ui', 'E', '_', 'fs', 'document', js)(
+  const rpcMock = {
+    declare: (spec) => (...args) => {
+      if (spec.object === 'session' && spec.method === 'access')
+        return Promise.resolve(view.canWrite !== false);
+      if (spec.object === 'uci' && spec.method === 'commit') {
+        return Promise.resolve(0);
+      }
+      return Promise.reject(new Error('unexpected rpc ' + spec.object + '.' + spec.method));
+    }
+  };
+  const uciMock = { set: () => {}, save: () => Promise.resolve(), load: () => Promise.resolve(),
+    apply: () => { throw new Error('must not apply unrelated UCI packages'); } };
+  const view = new Function('view', 'ui', 'E', '_', 'fs', 'document', 'rpc', 'uci', 'window', js)(
     { extend: value => value },
     { showModal: (title, nodes) => { modal = nodes; }, hideModal: () => {},
       addNotification: (title, node, style) => {
@@ -1205,7 +1217,8 @@ done
       createHandlerFn: (owner, fn) => (typeof fn === 'string' ? owner[fn] : fn).bind(owner) },
     (tag, attrs, children) => ({ tag, attrs, children }), text => text,
     { exec: (...args) => executeCommand(...args) },
-    { getElementById: id => elements[id] }
+    { getElementById: id => elements[id] },
+    rpcMock, uciMock, { confirm: () => true }
   );
   view.forwardBusy = true;
   view.confirmForward([]);
@@ -1327,7 +1340,7 @@ done
     count: '0', max: '30720', insert_failed: '7000000000', drop: '0', early_drop: '0'
   } }) };
   executeCommand = (file, args) => {
-    assert.equal(file, '/usr/sbin/jp-ipoe-setup');
+    assert.equal(file, '/usr/libexec/jp-ipoe-readonly');
     assert.deepEqual(args, ['status']);
     statusCalls++;
     return statusReply instanceof Error ? Promise.reject(statusReply) : Promise.resolve(statusReply);
@@ -1375,6 +1388,130 @@ done
   assert.equal(rangeDetail.open, true, 'failed refresh preserves the disclosure state while clearing its value');
   console.log('PASS status ranges: assigned counts, invalid/absent data, collapsed bounded details and stable refreshes');
   console.log('PASS kernel diagnostic UI: zero/unavailable/large counters, old backend, failed refresh and inactive-tab guard');
+
+  // Read-only wrapper: rpcd file ACLs are path-level, so the read grant
+  // must not reach any mutating subcommand. Old behavior: read grant on
+  // jp-ipoe-setup allowed stop/repair/forward writes. New: wrapper execs
+  // only the inspection set with no extra arguments.
+  const readonlyPath = 'root/usr/libexec/jp-ipoe-readonly';
+  if (process.platform === 'win32') {
+    const mode = cp.spawnSync('git', ['ls-files', '--stage', '--', readonlyPath], { cwd: root, encoding: 'utf8' });
+    assert.equal(mode.status, 0, mode.stderr);
+    assert.match(mode.stdout, /^100755 /, 'packaged read-only wrapper must be executable (Git mode)');
+  } else {
+    assert(fs.statSync(path.join(root, readonlyPath)).mode & 0o111, 'packaged wrapper must be executable');
+  }
+  const fakeSetup = tmp + '/fake-setup';
+  fs.writeFileSync(fakeSetup, '#!/bin/sh\necho "RAN: $*"\n');
+  fs.chmodSync(fakeSetup, 0o755);
+  const wrappedScript = read('root/usr/libexec/jp-ipoe-readonly').replaceAll('/usr/sbin/jp-ipoe-setup', fakeSetup);
+  const runWrapper = (args) => cp.spawnSync('sh', ['-c', wrappedScript, 'jp-ipoe-readonly'].concat(args),
+    { cwd: root, encoding: 'utf8' });
+  for (const args of [['status'], ['detect_br'], ['resolve'], ['forward_list'], ['forward_devices']]) {
+    const r = runWrapper(args);
+    assert.equal(r.status, 0, 'wrapper must allow ' + args.join(' ') + '\n' + r.stderr);
+    assert.equal(r.stdout.trim(), 'RAN: ' + args[0]);
+  }
+  for (const args of [['start'], ['stop'], ['repair'], ['boot'],
+    ['forward_add', 'tcp', '192.168.1.10', '80', ''],
+    ['forward_add6', 'tcp', '2001:db8::10', '22'],
+    ['forward_remove', 'saved'], ['status', 'extra'], [], ['status;reboot']]) {
+    const r = runWrapper(args);
+    assert.notEqual(r.status, 0, 'wrapper must refuse ' + JSON.stringify(args));
+    assert.match(r.stderr, /^ERROR: command not permitted$/m, 'refusal must be a user-visible ERROR: line');
+    assert.equal(r.stdout.trim(), '', 'refused commands must not execute anything');
+  }
+  assert.doesNotMatch(wrappedScript, new RegExp('\\bexec\\s+/usr/sbin/jp-ipoe-setup\\s+\\$@'),
+    'wrapper must not pass through arbitrary arguments');
+  const acl = JSON.parse(read('root/usr/share/rpcd/acl.d/luci-app-jp-ipoe.json'))['luci-app-jp-ipoe'];
+  assert.deepEqual(acl.read.file, { '/usr/libexec/jp-ipoe-readonly': ['exec'] }, 'read ACL must only exec the wrapper');
+  assert(!('/usr/sbin/jp-ipoe-setup' in (acl.read.file || {})), 'read ACL must not reach the writable path');
+  assert.deepEqual(acl.write.file, { '/usr/sbin/jp-ipoe-setup': ['exec'] });
+  assert.deepEqual(acl.write.ubus, { uci: ['commit'] }, 'targeted commit needs an explicit ubus grant');
+  console.log('PASS read-only wrapper whitelist and ACL split (mutations refused, inspection allowed)');
+
+  // UI permission gating: read-only users keep inspection through the
+  // wrapper, while every mutating control refuses before any fs.exec. Old
+  // behavior: all controls called jp-ipoe-setup directly with only the
+  // path-level read grant, so read-only users could stop/repair/write
+  // forwards.
+  const gateCalls = [];
+  executeCommand = (file, args) => {
+    gateCalls.push([file, args[0]]);
+    return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+  };
+  view.canWrite = true;
+  await view.execSetup(['status']);
+  assert.deepEqual(gateCalls.pop(), ['/usr/libexec/jp-ipoe-readonly', 'status']);
+  await view.execSetup(['start']);
+  assert.deepEqual(gateCalls.pop(), ['/usr/sbin/jp-ipoe-setup', 'start']);
+  await view.execSetup(['forward_add', 'tcp', '192.168.1.10', '80', '']);
+  assert.deepEqual(gateCalls.pop(), ['/usr/sbin/jp-ipoe-setup', 'forward_add']);
+
+  view.canWrite = false;
+  const blockedBefore = gateCalls.length;
+  view.confirmForward([['forward_add', 'tcp', '192.168.1.10', '22', '1001']]);
+  assert.equal(gateCalls.length, blockedBefore, 'read-only confirmForward must not exec anything');
+  assert(messages.some(m => /do not have permission to change IPoE settings/.test(m)),
+    'read-only mutation attempt must surface a permission error');
+  messages.length = 0;
+  view.requireWrite();
+  assert(messages.some(m => /do not have permission/.test(m)), 'requireWrite must notify');
+  messages.length = 0;
+
+  // Drive the actual production Apply/Repair methods, not a reconstructed chain.
+  view.canWrite = true;
+  const orderedOps = [];
+  let failedStep = '';
+  const formMap = { save: (callback, silent) => {
+    assert.equal(callback, null); assert.equal(silent, true);
+    orderedOps.push('save');
+    return failedStep === 'save' ? Promise.reject(new Error('save failure')) : Promise.resolve();
+  } };
+  executeCommand = (file, args) => {
+    assert.equal(file, '/usr/sbin/jp-ipoe-setup');
+    orderedOps.push('exec:' + args[0]);
+    return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+  };
+  rpcMock.declare = (spec) => (...args) => {
+    assert.equal(spec.object, 'uci'); assert.equal(spec.method, 'commit');
+    assert.deepEqual(spec.params, ['config']); assert.equal(spec.reject, true);
+    assert.deepEqual(args, ['jp_ipoe']);
+    orderedOps.push('commit:jp_ipoe');
+    return failedStep === 'commit' ? Promise.reject(new Error('commit failure')) : Promise.resolve(0);
+  };
+  for (const force of [false, true]) {
+    for (failedStep of ['', 'save', 'commit']) {
+      orderedOps.length = 0;
+      await view.applyIPoE(formMap, force);
+      const expected = ['save'];
+      if (failedStep !== 'save') expected.push('commit:jp_ipoe');
+      if (!failedStep) expected.push('exec:' + (force ? 'repair' : 'start'));
+      assert.deepEqual(orderedOps, expected, 'failed save/commit must stop the actual apply chain');
+    }
+  }
+  uciMock.set = (conf, section, key, value) => {
+    assert.deepEqual([conf, section, key, value], ['jp_ipoe', 'config', 'br_addr', '2001:db8::1']);
+    orderedOps.push('set:jp_ipoe');
+  };
+  uciMock.save = () => formMap.save(null, true);
+  for (failedStep of ['', 'save', 'commit']) {
+    orderedOps.length = 0;
+    await view.saveAndApplyBR('2001:db8::1');
+    const expected = ['set:jp_ipoe', 'save'];
+    if (failedStep !== 'save') expected.push('commit:jp_ipoe');
+    if (!failedStep) expected.push('exec:start');
+    assert.deepEqual(orderedOps, expected);
+  }
+  view.canWrite = false;
+  orderedOps.length = 0;
+  await view.applyIPoE(formMap, false);
+  await view.applyIPoE(formMap, true);
+  await view.saveAndApplyBR('2001:db8::1');
+  assert.deepEqual(orderedOps, [], 'read-only actions must not save, commit or execute');
+  console.log('PASS real Apply/Repair/BR save ordering, targeted commit, failure stops and read-only gates');
+
+
   console.log(`PASS ${count} backend checks + package/UI structure and shell/JS syntax. Real browser/OpenWrt kernel not exercised.`);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

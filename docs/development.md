@@ -56,6 +56,7 @@ A successful package build is not a live-line connectivity test.
 | --- | --- |
 | [`config.js`](../htdocs/luci-static/resources/view/jp_ipoe/config.js) | One LuCI view with Configuration, Status and Port Forwarding tabs. Calls the backend through `fs.exec`. |
 | [`jp-ipoe-setup`](../root/usr/sbin/jp-ipoe-setup) | Validation, setup/stop/repair/boot, shared mutation lock and command dispatch. |
+| [`jp-ipoe-readonly`](../root/usr/libexec/jp-ipoe-readonly) | Executable, single-argument inspection whitelist for read-only LuCI sessions. |
 | [`config.sh`](../root/usr/share/jp-ipoe/config.sh) | Loads plugin settings and saved IPv4 forwarding rules from UCI. |
 | [`jp-ipoe-info`](../root/usr/libexec/jp-ipoe-info) | Status, BR detection and offline MAP-E parameter lookup. |
 | [`map.sh`](../root/usr/share/jp-ipoe/map.sh) | Patched netifd MAP protocol handler; publishes redirects after SNAT reservation. |
@@ -88,6 +89,15 @@ without these fields. There is no background collector or additional package
 dependency; polling remains confined to the visible Status tab.
 
 ### Apply, repair and boot
+
+LuCI saves form changes to its rpcd session delta, explicitly commits only
+`jp_ipoe`, then invokes setup. Save/commit failure blocks execution. BR save uses
+the same targeted commit; do not use global `uci.apply()` to apply unrelated
+pending packages. Read ACL permits only the strict `jp-ipoe-readonly` wrapper;
+write ACL permits the setup path and targeted UCI commit. Mutation handlers also
+check session permissions. The wrapper must retain executable Git mode because
+`fs.exec` invokes it directly. Validate both ACL enforcement and session handoff
+on the target firmware; mocked JS and ACL shape checks do not prove either.
 
 Normal `start` first calls the read-only `configuration_is_current` check. It
 compares owned UCI settings and observable runtime: WAN6 device/DUID/prefix,
@@ -214,7 +224,10 @@ rollback retains saved state/reservations and reports possible active access;
 a failed SNAT refresh can leave an extra reservation rather than risk a collision.
 Even stale UCI allocations require readable netifd state before deleting saved
 rules. A failed/unknown interface query retains the saved record; it is not
-interpreted as an offline interface. Neither path restarts the tunnel nor
+interpreted as an offline interface. This includes an interface already removed
+from netifd: automatic deletion is conservatively refused without runtime proof;
+manual saved-state cleanup requires separately checking live firewall state.
+Neither path restarts the tunnel nor
 flushes conntrack. Existing sessions may
 continue after deletion. Rules bind to public IPv4 plus external port;
 incompatible allocations or local conflicts suspend them instead of reassigning
@@ -242,7 +255,8 @@ checking compatibility.
 
 ## Command reference
 
-LuCI uses the same `/usr/sbin/jp-ipoe-setup` entry point. These examples are for
+LuCI inspections use `/usr/libexec/jp-ipoe-readonly`, which delegates to setup;
+mutations and these SSH examples use `/usr/sbin/jp-ipoe-setup`. These examples are for
 a router with the package installed. `start`, `repair` and `stop` change network
 state; `repair` deliberately interrupts traffic.
 
@@ -287,7 +301,10 @@ Python fixture syntax is also checked there, without executing kernel tests.
 The suite includes relay/server-mode startup, interface-role and firewall
 ownership guards, failure propagation, cleanup/retry, signal/lock ordering,
 PPPoE scoping and BMR-aware status. These tests mock OpenWrt services; they do
-not establish live netifd/fw4 or Internet behavior.
+not establish live netifd/fw4 or Internet behavior. The runtime firewall inspector
+is exercised using JS-compatible ucode builtin substitutes; that is not native
+ucode compilation/execution. On Windows, the wrapper's executable Git mode is
+checked through Git (the host also needs Git Bash for the shell checks).
 
 ### Native kernel checks
 

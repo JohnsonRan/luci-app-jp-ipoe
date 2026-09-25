@@ -2,15 +2,36 @@
 'require view';
 'require form';
 'require fs';
+'require rpc';
 'require ui';
 'require uci';
 'require poll';
 'require tools.widgets as widgets';
 
+// Read-only subcommands are routed through the wrapper so users without
+// write access keep status/preview; mutating commands require the writable
+// path and are gated by this.canWrite.
+var SETUP_SCRIPT = '/usr/sbin/jp-ipoe-setup';
+var READONLY_SCRIPT = '/usr/libexec/jp-ipoe-readonly';
+var READONLY_ACTIONS = { status: 1, detect_br: 1, resolve: 1, forward_list: 1, forward_devices: 1 };
+
+var queryWriteAccess = rpc.declare({
+	object: 'session',
+	method: 'access',
+	params: [ 'scope', 'object', 'function' ],
+	expect: { 'access': false }
+});
+
 return view.extend({
 	load: function() {
+		var self = this;
 		return Promise.all([
-			uci.load('jp_ipoe')
+			uci.load('jp_ipoe'),
+			// Mirror form.Map's own readonly probe (see LuCI form.js load());
+			// session.access is answerable for any valid login session.
+			queryWriteAccess('uci', 'jp_ipoe', 'write').then(function(allow) {
+				self.canWrite = !!allow;
+			})
 		]);
 	},
 
@@ -36,9 +57,39 @@ return view.extend({
 		return _('Setup script exited with code:') + ' ' + res.code;
 	},
 
+	// Route one subcommand through the wrapper or the writable path. The
+	// wrapper only accepts the read-only set, so this choice is enforced
+	// server-side by the rpcd file ACLs, not just hidden in the UI.
+	execSetup: function(args) {
+		return fs.exec(READONLY_ACTIONS[args[0]] ? READONLY_SCRIPT : SETUP_SCRIPT, args);
+	},
+
+	// Commit exactly one UCI config via the rpcd ubus API (uci.commit takes a
+	// config name). Deliberately not uci.apply(): that commits every pending
+	// config on the router, not just ours.
+	commitJpIpoe: function() {
+		return rpc.declare({
+			object: 'uci',
+			method: 'commit',
+			params: [ 'config' ],
+			reject: true
+		})('jp_ipoe');
+	},
+
+	// Guard for every mutating action. Defensive: the rpcd ACL already
+	// denies the writable path, so a stale/missed gate shows the backend
+	// refusal instead of silently working.
+	requireWrite: function() {
+		if (this.canWrite === false) {
+			ui.addNotification(null, E('p', _('You do not have permission to change IPoE settings.')), 'error');
+			return false;
+		}
+		return true;
+	},
+
 	runSetupAction: function(args, okMessage, failMessage) {
 		var self = this;
-		return fs.exec('/usr/sbin/jp-ipoe-setup', args).then(function(res) {
+		return this.execSetup(args).then(function(res) {
 			if (res.code === 0) {
 				var unchanged = args[0] === 'start' && (res.stdout || '').trim() === 'JP_IPOE_UNCHANGED=1';
 				ui.addTimeLimitedNotification(null, E('p', unchanged
@@ -104,6 +155,27 @@ return view.extend({
 			{ id: 's-ct-drop', label: _('Conntrack drops'), get: function(d) { return { text: counter(d, 'drop') }; } },
 			{ id: 's-ct-early-drop', label: _('Conntrack early evictions'), get: function(d) { return { text: counter(d, 'early_drop') }; } }
 		];
+	},
+
+	applyIPoE: function(map, force) {
+		var self = this;
+		if (!this.requireWrite())
+			return;
+		if (force && !window.confirm(_('Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic.')))
+			return;
+		ui.addTimeLimitedNotification(null, E('p', _('Checking IPoE settings; changes may take about 30 seconds.')), 5000, 'info');
+		// Save stages session deltas. Only commit jp_ipoe, then let the CLI read it.
+		return map.save(null, true).catch(function(e) {
+			ui.addNotification(null, E('p', _('Failed to save IPoE settings; nothing was applied.') + ' ' + (e.message || e)), 'error');
+			throw e;
+		}).then(function() {
+			return self.commitJpIpoe().catch(function(e) {
+				ui.addNotification(null, E('p', _('Failed to commit jp_ipoe configuration; IPoE was not re-applied.') + ' ' + (e.message || e)), 'error');
+				throw e;
+			});
+		}).then(function() {
+			return self.runSetupAction([force ? 'repair' : 'start'], _('IPoE configuration applied.'));
+		}).catch(function() { /* surfaced above */ });
 	},
 
 	render: function() {
@@ -196,27 +268,20 @@ return view.extend({
 
 		var s2 = m.section(form.NamedSection, 'config', 'jp_ipoe', _('Actions'));
 
-		var applyIPoE = function(force) {
-			if (force && !window.confirm(_('Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic.')))
-				return;
-			ui.addTimeLimitedNotification(null, E('p', _('Checking IPoE settings; changes may take about 30 seconds.')), 5000, 'info');
-			return m.save(null, true).then(function() {
-				return self.runSetupAction([force ? 'repair' : 'start'], _('IPoE configuration applied.'));
-			});
-		};
-
 		o = s2.option(form.Button, '_apply', _('Apply IPoE Configuration'));
 		o.inputstyle = 'action';
-		o.onclick = function() { return applyIPoE(false); };
+		o.onclick = function() { return self.applyIPoE(m, false); };
 
 		o = s2.option(form.Button, '_repair', _('Force Reconnect / Repair'));
 		o.inputstyle = 'negative';
 		o.description = _('Force full setup when IPoE is connected but unusable.');
-		o.onclick = function() { return applyIPoE(true); };
+		o.onclick = function() { return self.applyIPoE(m, true); };
 
 		o = s2.option(form.Button, '_stop', _('Stop IPoE Interfaces'));
 		o.inputstyle = 'negative';
 		o.onclick = function() {
+			if (!self.requireWrite())
+				return;
 			if (!window.confirm(_('Stop MAP-E now? IPv4 traffic using IPoE will be interrupted.') + '\n' + _('Native IPv6 rules are not removed by stopping MAP-E.')))
 				return;
 			return self.runSetupAction(['stop'], _('IPoE interfaces stopped.'));
@@ -342,6 +407,8 @@ return view.extend({
 			]),
 			E('section', { 'class': 'jp-forward-section' }, [
 				E('h3', {}, _('Add a forward')),
+				this.canWrite === false ? E('p', { 'class': 'jp-forward-note' },
+					_('Read-only access: adding and deleting forwards is disabled.')) : '',
 				E('p', { 'class': 'jp-forward-note' }, _('Leave the IPv4 external port empty for automatic selection. IPv6 uses the device address and service port directly.')),
 				E('div', { 'class': 'jp-forward-selectors' }, [
 					field('jp-forward-device', _('Device (MAC)'), E('select', {
@@ -418,7 +485,7 @@ return view.extend({
 
 	loadForwardDevices: function() {
 		var self = this;
-		return fs.exec('/usr/sbin/jp-ipoe-setup', ['forward_devices']).then(function(res) {
+		return this.execSetup(['forward_devices']).then(function(res) {
 			if (res.code !== 0)
 				throw new Error(self.formatCommandOutput(res));
 			self.forwardDevices = JSON.parse(res.stdout);
@@ -453,7 +520,7 @@ return view.extend({
 
 	loadForwards: function() {
 		var self = this;
-		return fs.exec('/usr/sbin/jp-ipoe-setup', ['forward_list']).then(function(res) {
+		return this.execSetup(['forward_list']).then(function(res) {
 			if (res.code !== 0)
 				throw new Error(self.formatCommandOutput(res));
 			var data = JSON.parse(res.stdout);
@@ -508,6 +575,8 @@ return view.extend({
 			ui.addTimeLimitedNotification(null, E('p', _('A port-forwarding operation is in progress. Please wait.')), 5000, 'info');
 			return;
 		}
+		if (!this.requireWrite())
+			return;
 		var commands = Array.isArray(args[0]) ? args : [args];
 		var adding = commands[0][0] !== 'forward_remove';
 		var ipv6 = (rule && rule.family === 'ipv6') || commands.some(function(command) { return command[0] === 'forward_add6'; });
@@ -538,7 +607,7 @@ return view.extend({
 						self.forwardBusy = true;
 						return commands.reduce(function(pending, command) {
 							return pending.then(function() {
-								return fs.exec('/usr/sbin/jp-ipoe-setup', command).then(function(res) {
+								return self.execSetup(command).then(function(res) {
 									if (res.code !== 0)
 										throw new Error(self.formatCommandOutput(res));
 									var message = _('Port forward removed.');
@@ -571,7 +640,7 @@ return view.extend({
 			out.textContent = _('Resolving parameters from WAN6 prefix...');
 		}
 
-		return fs.exec('/usr/sbin/jp-ipoe-setup', ['resolve']).then(function(res) {
+		return this.execSetup(['resolve']).then(function(res) {
 			if (res.code === 0 && res.stdout) {
 				var p = {};
 				res.stdout.split(/\n/).forEach(function(line) {
@@ -636,7 +705,7 @@ return view.extend({
 		if (this.activeTab !== 'status')
 			return Promise.resolve();
 
-		return fs.exec('/usr/sbin/jp-ipoe-setup', ['status']).then(function(res) {
+		return this.execSetup(['status']).then(function(res) {
 			if (res.code !== 0 || !res.stdout)
 				throw new Error('Status unavailable');
 			var data = JSON.parse(res.stdout);
@@ -675,7 +744,7 @@ return view.extend({
 		var self = this;
 		ui.addTimeLimitedNotification(null, E('p', _('Detecting BR address via mapcalc...')), 5000, 'info');
 
-		return fs.exec('/usr/sbin/jp-ipoe-setup', ['detect_br']).then(function(res) {
+		return this.execSetup(['detect_br']).then(function(res) {
 			var errMsg = _('Detection failed');
 
 			if (res.code === 0 && res.stdout) {
@@ -719,18 +788,23 @@ return view.extend({
 
 	saveAndApplyBR: function(br) {
 		var self = this;
+		if (!this.requireWrite())
+			return;
 		uci.set('jp_ipoe', 'config', 'br_addr', br);
-		return uci.save().then(function() {
-			return uci.apply();
-		}).then(function() {
-			ui.hideModal();
-			return self.runSetupAction(['start'],
-				_('BR address saved and IPoE re-applied.'),
-				_('BR address saved, but IPoE re-apply failed.'));
-		}).catch(function(e) {
-			ui.hideModal();
-			ui.addNotification(null, E('p', _('Failed to save BR address')), 'error');
-		});
+		// Targeted commit (not uci.apply, which would commit every pending
+		// config); a failure stops before start runs on stale config.
+		return uci.save()
+			.then(function() { return self.commitJpIpoe(); })
+			.then(function() {
+				ui.hideModal();
+				return self.runSetupAction(['start'],
+					_('BR address saved and IPoE re-applied.'),
+					_('BR address saved, but IPoE re-apply failed.'));
+			})
+			.catch(function(e) {
+				ui.hideModal();
+				ui.addNotification(null, E('p', _('Failed to save BR address; nothing was applied.') + ' ' + (e.message || e)), 'error');
+			});
 	},
 
 	handleSaveApply: null,

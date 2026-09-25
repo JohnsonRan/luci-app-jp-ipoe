@@ -1,0 +1,16 @@
+#!/bin/sh
+# Read-only facade over jp-ipoe-setup for LuCI users without write access.
+# rpcd file ACLs are path-level: a read grant on jp-ipoe-setup itself would
+# allow stop/repair/forward mutations. This wrapper accepts exactly one of
+# the inspection subcommands with no extra arguments, so a read ACL on this
+# path cannot mutate anything.
+
+case "$#:$1" in
+	1:status|1:detect_br|1:resolve|1:forward_list|1:forward_devices)
+		exec /usr/sbin/jp-ipoe-setup "$1"
+		;;
+	*)
+		echo "ERROR: command not permitted" >&2
+		exit 1
+		;;
+esac
