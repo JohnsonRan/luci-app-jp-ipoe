@@ -6,16 +6,52 @@ BACKUP="$ROOT/lib/netifd/proto/map.sh.orig"
 SOURCE="$ROOT/usr/share/jp-ipoe/map.sh"
 TARGET_DIR="${TARGET%/*}"
 
+# Prepare content and permissions before replacing the live handler.
+replace_map() (
+	tmp="$(mktemp "$TARGET_DIR/.jp-ipoe-map.XXXXXX")" || exit 1
+	trap 'rm -f "$tmp"' EXIT
+	cp "$1" "$tmp" && chmod +x "$tmp" && mv -f "$tmp" "$TARGET"
+)
+
+case "${1:-install}" in
+restore|uninstall|remove)
+	# Do not touch a foreign handler or its backup. Missing target is already safe.
+	[ -f "$TARGET" ] || exit 0
+	grep -q "JP_IPOE_PATCH_VERSION=" "$TARGET" 2>/dev/null || exit 0
+	if [ -f "$BACKUP" ] && ! grep -q "JP_IPOE_PATCH_VERSION=" "$BACKUP" 2>/dev/null; then
+		if replace_map "$BACKUP"; then
+			rm -f "$BACKUP" || exit 1
+			exit 0
+		fi
+		# apk purges package files even after a failed pre-deinstall hook.
+		# Keep the stock backup, but withdraw our now-unusable patched handler.
+		echo "ERROR: Cannot restore map.sh; preserving $BACKUP for manual recovery." >&2
+		if grep -q "JP_IPOE_PATCH_VERSION=" "$TARGET" 2>/dev/null; then
+			rm -f "$TARGET" || echo "ERROR: Cannot remove patched $TARGET; repair required before using MAP." >&2
+		fi
+		exit 1
+	fi
+	echo "WARNING: No usable stock MAP handler backup; removing patched handler. Reinstall the map package to restore stock support." >&2
+	rm -f "$TARGET"
+	exit $?
+	;;
+install)
+	;;
+*)
+	echo "Usage: $0 [install|restore]" >&2
+	exit 1
+	;;
+esac
+
 [ -f "$SOURCE" ] || {
 	echo "ERROR: Patched map.sh not found at $SOURCE" >&2
 	exit 1
 }
 
-[ -d "$TARGET_DIR" ] || mkdir -p "$TARGET_DIR"
+[ -d "$TARGET_DIR" ] || mkdir -p "$TARGET_DIR" || exit 1
 
 if [ -f "$TARGET" ] && ! grep -q "JP_IPOE_PATCH_VERSION=" "$TARGET" 2>/dev/null; then
 	cp "$TARGET" "$BACKUP" || exit 1
 fi
 
-cp -f "$SOURCE" "$TARGET" || exit 1
-chmod +x "$TARGET" || exit 1
+replace_map "$SOURCE"

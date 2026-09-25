@@ -36,7 +36,17 @@ hooks. Keep the literal `# call BuildPackage - OpenWrt buildroot signature`
 comment so OpenWrt's package scanner discovers the package.
 
 `postinst` installs the bundled MAP handler and refreshes LuCI/rpcd state on a
-live upgrade. Bump `PKG_VERSION` / `PKG_RELEASE` when releasing. Tags matching
+live upgrade. `prerm` restores the saved stock handler before package helpers
+are removed, skipping opkg upgrades (apk uses separate upgrade hooks). It leaves
+foreign handlers and their backups untouched. Restoration prepares a same-directory
+temporary file before rename. If restoration fails, it preserves the backup and
+attempts to remove the owned patched handler: apk continues purging package files
+even when pre-deinstall fails. If no usable backup exists, the patched handler is
+removed; reinstall `map` to recover stock support. An unwritable filesystem can
+prevent both restoration and withdrawal and requires manual recovery. No hook
+claims to validate live tunnel behavior.
+
+Bump `PKG_VERSION` / `PKG_RELEASE` when releasing. Tags matching
 `v*` trigger a release; a manual workflow run produces a nightly prerelease.
 A successful package build is not a live-line connectivity test.
 

@@ -1048,7 +1048,7 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   for (const p of ['root/usr/share/jp-ipoe/forward.sh', 'root/usr/share/jp-ipoe/config.sh',
     'root/usr/libexec/jp-ipoe-forward', 'root/usr/libexec/jp-ipoe-map-nft', 'root/usr/libexec/jp-ipoe-info',
     'root/usr/share/jp-ipoe/map.sh', 'root/usr/sbin/jp-ipoe-setup', 'root/etc/init.d/jp_ipoe',
-    'root/usr/libexec/jp-ipoe-install-map']) {
+    'root/usr/libexec/jp-ipoe-install-map', 'root/usr/libexec/jp-ipoe-uninstall-map']) {
     const r = cp.spawnSync('sh', ['-n', p], { cwd: root, encoding: 'utf8' });
     assert.equal(r.status, 0, p + '\n' + r.stderr);
   }
@@ -1063,7 +1063,109 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   const postinst = makefile.match(/define Package\/.*\/postinst\n([\s\S]*?)\nendef/)[1].replaceAll('$$', '$');
   const postinstCheck = cp.spawnSync('sh', ['-n'], { input: postinst, encoding: 'utf8' });
   assert.equal(postinstCheck.status, 0, postinstCheck.stderr);
-  console.log('PASS LuCI scan signature, single registration, description, hook ordering and postinst syntax');
+  const prerm = makefile.match(/define Package\/.*\/prerm\n([\s\S]*?)\nendef/)[1].replaceAll('$$', '$');
+  const prermCheck = cp.spawnSync('sh', ['-n'], { input: prerm, encoding: 'utf8' });
+  assert.equal(prermCheck.status, 0, prermCheck.stderr);
+  console.log('PASS LuCI scan signature, single registration, description, hook ordering and package hook syntax');
+
+  fs.writeFileSync(path.join(tmp, 'postinst.sh'), postinst, { mode: 0o755 });
+  fs.writeFileSync(path.join(tmp, 'prerm.sh'), prerm, { mode: 0o755 });
+
+  run('package hooks: install creates backup, upgrade preserves state, failure propagates', `
+MDIR="$TEST_TMP/pkg_test1"
+mkdir -p "$MDIR/lib/netifd/proto" "$MDIR/usr/share/jp-ipoe" "$MDIR/usr/libexec" "$MDIR/bin"
+cp root/usr/libexec/jp-ipoe-install-map "$MDIR/usr/libexec/"
+cp root/usr/libexec/jp-ipoe-uninstall-map "$MDIR/usr/libexec/"
+cp root/usr/share/jp-ipoe/map.sh "$MDIR/usr/share/jp-ipoe/"
+printf '#!/bin/sh\\n# stock original\\n' > "$MDIR/lib/netifd/proto/map.sh"
+chmod +x "$MDIR/lib/netifd/proto/map.sh"
+
+IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/postinst.sh" || fail install
+grep -q "JP_IPOE_PATCH_VERSION=" "$MDIR/lib/netifd/proto/map.sh" || fail install_patch
+grep -q "stock original" "$MDIR/lib/netifd/proto/map.sh.orig" || fail install_backup
+
+IPKG_INSTROOT="$MDIR" PKG_UPGRADE=1 sh "$TEST_TMP/prerm.sh" || fail upgrade_env
+grep -q "JP_IPOE_PATCH_VERSION=" "$MDIR/lib/netifd/proto/map.sh" || fail upgrade_reverted
+
+IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/prerm.sh" upgrade 1.6.0 || fail upgrade_arg
+grep -q "JP_IPOE_PATCH_VERSION=" "$MDIR/lib/netifd/proto/map.sh" || fail upgrade_arg_reverted
+[ -f "$MDIR/lib/netifd/proto/map.sh.orig" ] || fail upgrade_backup_missing
+
+printf '#!/bin/sh\\nJP_IPOE_PATCH_VERSION=9999.01\\n' > "$MDIR/usr/share/jp-ipoe/map.sh"
+IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/postinst.sh" || fail upgrade_postinst
+grep -q "JP_IPOE_PATCH_VERSION=9999.01" "$MDIR/lib/netifd/proto/map.sh" || fail upgrade_new_version
+grep -q "stock original" "$MDIR/lib/netifd/proto/map.sh.orig" || fail upgrade_orig_lost
+
+printf '#!/bin/sh\\nexit 1\\n' > "$MDIR/bin/cp"
+chmod +x "$MDIR/bin/cp"
+BIN_DIR="$(cd "$MDIR/bin" && pwd)"
+PATH="$BIN_DIR:$PATH" IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/prerm.sh" remove && fail fail_suppressed
+# apk continues purging package files even after a pre-deinstall failure.
+rm -rf "$MDIR/usr/share/jp-ipoe" "$MDIR/usr/libexec"
+[ ! -f "$MDIR/lib/netifd/proto/map.sh" ] || fail broken-handler-after-failed-hook
+[ -f "$MDIR/lib/netifd/proto/map.sh.orig" ] || fail recovery-backup-lost
+exit 0
+`);
+
+  run('package hooks: removal restores original, removes backup, handles absent backup and foreign scripts', `
+MDIR="$TEST_TMP/pkg_test2"
+mkdir -p "$MDIR/lib/netifd/proto" "$MDIR/usr/share/jp-ipoe" "$MDIR/usr/libexec"
+cp root/usr/libexec/jp-ipoe-install-map "$MDIR/usr/libexec/"
+cp root/usr/libexec/jp-ipoe-uninstall-map "$MDIR/usr/libexec/"
+printf '#!/bin/sh\\n# stock original\\n' > "$MDIR/lib/netifd/proto/map.sh.orig"
+printf '#!/bin/sh\\nJP_IPOE_PATCH_VERSION=2026.09.05\\n. /usr/share/jp-ipoe/forward.sh\\n' > "$MDIR/lib/netifd/proto/map.sh"
+chmod +x "$MDIR/lib/netifd/proto/map.sh"
+
+IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/prerm.sh" remove || fail uninstall
+grep -q "stock original" "$MDIR/lib/netifd/proto/map.sh" || fail restore_stock
+grep -q "JP_IPOE_PATCH_VERSION=" "$MDIR/lib/netifd/proto/map.sh" && fail patch_still_present
+[ ! -f "$MDIR/lib/netifd/proto/map.sh.orig" ] || fail backup_not_deleted
+[ -x "$MDIR/lib/netifd/proto/map.sh" ] || fail restore_not_exec
+rm -rf "$MDIR/usr/share/jp-ipoe" "$MDIR/usr/libexec"
+sh "$MDIR/lib/netifd/proto/map.sh" || fail restored_broken_after_helpers_deleted
+
+mkdir -p "$MDIR/usr/libexec"
+cp root/usr/libexec/jp-ipoe-install-map "$MDIR/usr/libexec/"
+cp root/usr/libexec/jp-ipoe-uninstall-map "$MDIR/usr/libexec/"
+printf '#!/bin/sh\\nJP_IPOE_PATCH_VERSION=2026.09.05\\n' > "$MDIR/lib/netifd/proto/map.sh"
+IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/prerm.sh" remove || fail absent_backup_prerm
+[ ! -f "$MDIR/lib/netifd/proto/map.sh" ] || fail broken_handler_left
+
+printf '#!/bin/sh\\n# foreign map script\\n' > "$MDIR/lib/netifd/proto/map.sh"
+printf '#!/bin/sh\\n# stale backup\\n' > "$MDIR/lib/netifd/proto/map.sh.orig"
+IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/prerm.sh" remove || fail foreign_prerm
+grep -q "foreign map script" "$MDIR/lib/netifd/proto/map.sh" || fail foreign_clobbered
+grep -q 'stale backup' "$MDIR/lib/netifd/proto/map.sh.orig" || fail foreign-backup-touched
+exit 0
+`);
+
+  run('package restore failures never expose partial copy and retain original backup', `
+MDIR="$TEST_TMP/pkg_failures"
+for tool in cp chmod mv; do
+ rm -rf "$MDIR"
+ mkdir -p "$MDIR/lib/netifd/proto" "$MDIR/usr/libexec" "$MDIR/bin"
+ cp root/usr/libexec/jp-ipoe-install-map root/usr/libexec/jp-ipoe-uninstall-map "$MDIR/usr/libexec/"
+ printf '#!/bin/sh\\n# stock recovery\\n' > "$MDIR/lib/netifd/proto/map.sh.orig"
+ printf '#!/bin/sh\\nJP_IPOE_PATCH_VERSION=test\\n' > "$MDIR/lib/netifd/proto/map.sh"
+ if [ "$tool" = cp ]; then
+  printf '%s\\n' '#!/bin/sh' 'echo partial > "$2"' \
+   'grep -q JP_IPOE_PATCH_VERSION= "$IPKG_INSTROOT/lib/netifd/proto/map.sh" || touch "$IPKG_INSTROOT/clobbered"' \
+   'exit 1' > "$MDIR/bin/$tool"
+ else
+  printf '#!/bin/sh\\nexit 1\\n' > "$MDIR/bin/$tool"
+ fi
+ chmod +x "$MDIR/bin/$tool"
+ BIN_DIR="$(cd "$MDIR/bin" && pwd)"
+ PATH="$BIN_DIR:$PATH" IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/prerm.sh" remove && fail "ignored $tool"
+ rm -rf "$MDIR/usr/libexec"
+ [ ! -f "$MDIR/lib/netifd/proto/map.sh" ] || fail "broken target after $tool failure"
+ grep -q 'stock recovery' "$MDIR/lib/netifd/proto/map.sh.orig" || fail lost-backup
+ [ ! -e "$MDIR/clobbered" ] || fail partial-copy-was-visible
+ for leftover in "$MDIR/lib/netifd/proto"/.jp-ipoe-map.*; do
+  [ ! -e "$leftover" ] || fail leaked-temp
+ done
+done
+`, '');
 
   const js = read('htdocs/luci-static/resources/view/jp_ipoe/config.js');
   let modal, notifications = 0, executions = 0;

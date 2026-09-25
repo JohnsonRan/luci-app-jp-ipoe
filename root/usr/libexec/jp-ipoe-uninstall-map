@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Both helpers are still installed during prerm/pre-deinstall.
+exec sh "${IPKG_INSTROOT:-}/usr/libexec/jp-ipoe-install-map" restore
