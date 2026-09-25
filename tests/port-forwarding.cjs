@@ -611,6 +611,8 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   view.confirmForward(['forward_remove', 'saved'], { proto: 'tcpudp', public_ip: '203.0.113.1',
     external_port: '1001', internal_ip: '192.168.1.10', internal_port: '8080' });
   assert.match(modal[0].children, /TCP \+ UDP: 203\.0\.113\.1:1001 → 192\.168\.1\.10:8080/);
+  const modalText = () => modal.filter(node => node.tag === 'p').map(node => node.children).join('\n');
+  assert.match(modalText(), /Existing sessions or other firewall rules may still allow access/);
   view.forwardBusy = true;
   modal[modal.length - 1].children[2].attrs.click();
   assert.equal(executions, 0);
@@ -655,6 +657,14 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
     };
     view.forwardBusy = false;
     view.confirmForward(dual);
+    for (const warning of [
+      /do not restart MAP-E or clear existing connections/,
+      /exposes the LAN service to the Internet.*Secure it first/,
+      /local checks do not guarantee future availability/,
+      /IPv6 rules survive MAP-E stop and plugin uninstall/,
+      /Delete here or in Firewall traffic rules; recreate after destination IPv6 changes/,
+      /two rules separately.*successful rules remain.*check existing rules before retrying/
+    ]) assert.match(modalText(), warning, 'concise copy must retain the safety warning');
     await modal[modal.length - 1].children[2].attrs.click();
     assert.deepEqual(calls, failAt === 'forward_add' ? ['forward_add'] : ['forward_add', 'forward_add6']);
     assert.equal(view.forwardBusy, false);
@@ -662,10 +672,54 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   }
   console.log('PASS device selection, IPv6 address filtering, family controls and dual-stack partial failures');
 
+  nodes.length = 0;
+  collect(view.renderStatusPanel());
+  const statusNote = nodes.filter(node => node.tag === 'p').map(node => node.children).join('\n');
+  assert.match(statusNote, /whole router.*counters are cumulative/);
+  assert.match(statusNote, /not MAP-E port usage or Internet loss.*Unavailable is not zero/);
+  assert.match(nodes.find(node => node.tag === 'table').attrs.style, /table-layout:fixed.*overflow-wrap:anywhere/,
+    'expanded ranges must not squeeze labels or overflow narrow screens');
+  const rangeDetails = nodes.filter(node => node.tag === 'details');
+  assert.equal(rangeDetails.length, 1, 'status port ranges use a native disclosure');
+  const rangeDetail = rangeDetails[0];
+  assert(!Object.hasOwn(rangeDetail.attrs, 'open'), 'status ranges start collapsed');
+  const rangeSummary = rangeDetail.children[0];
+  assert.equal(rangeSummary.tag, 'summary');
+  assert.equal(rangeSummary.attrs.id, 's-port-info-summary');
+  assert.equal(rangeSummary.children, 'Unavailable');
+  const rangeValue = nodes.find(node => node.attrs.id === 's-port-info');
+  assert.equal(rangeDetail.children[1], rangeValue, 'refresh only updates the disclosure content');
+  assert.equal(rangeValue.attrs.tabindex, '0', 'scrollable ranges are keyboard accessible');
+  assert.equal(rangeValue.attrs['aria-label'], 'Assigned Port Ranges');
+  assert.match(rangeValue.attrs.style, /max-height:12rem/);
+  assert.match(rangeValue.attrs.style, /overflow:auto/);
+  assert.match(rangeValue.attrs.style, /overflow-wrap:anywhere/);
+  const longRanges = Array.from({ length: 63 }, (_, i) => `${(i + 1) * 1024 + 224}-${(i + 1) * 1024 + 239}`).join(' ');
   const fields = view.statusFields();
   for (const field of fields) elements[field.id] = { textContent: '', style: {} };
+  for (const node of [rangeValue, rangeSummary]) {
+    node.style = {};
+    Object.defineProperty(node, 'textContent', {
+      get() { return this.children; }, set(value) { this.children = value; }
+    });
+    elements[node.attrs.id] = node;
+  }
+  for (const [input, expected] of [
+    ["'1248-1263 2272-2287'", 'Ranges: 2 · Assigned ports: 32'],
+    ['"80, 443, 5000-5002"', 'Ranges: 3 · Assigned ports: 5'],
+    ['2272-2287\t1248-1263\n', 'Ranges: 2 · Assigned ports: 32'],
+    ['1-65535', 'Ranges: 1 · Assigned ports: 65535'],
+    ['65535', 'Ranges: 1 · Assigned ports: 1'],
+    ['', 'Unavailable'], ['  ', 'Unavailable'], ["''", 'Unavailable'],
+    [undefined, 'Unavailable'], [null, 'Unavailable'], ['-', 'Unavailable'],
+    ['Unavailable', 'Unavailable'],
+    ['1-3 3-5', 'Unknown'], ['80 80', 'Unknown'], ['0', 'Unknown'],
+    ['65536', 'Unknown'], ['9-2', 'Unknown'], ['bad', 'Unknown'],
+    ['<img src=x onerror=alert(1)>', 'Unknown'], ['"80', 'Unknown'],
+    [[], 'Unknown'], [true, 'Unknown']
+  ]) assert.equal(view.portRangeSummary(input), expected, 'range summary for '+JSON.stringify(input));
   let statusCalls = 0;
-  let statusReply = { code: 0, stdout: JSON.stringify({ mape_state: 'up', conntrack: {
+  let statusReply = { code: 0, stdout: JSON.stringify({ mape_state: 'up', port_info: longRanges, conntrack: {
     count: '0', max: '30720', insert_failed: '7000000000', drop: '0', early_drop: '0'
   } }) };
   executeCommand = (file, args) => {
@@ -683,6 +737,19 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   assert.equal(elements['s-ct-insert-failed'].textContent, '7000000000');
   assert.equal(elements['s-ct-insert-failed'].style.color, '', 'historical global errors are not a red MAP-E fault');
   assert.equal(elements['s-ct-drop'].textContent, '0');
+  assert.equal(rangeValue.textContent, longRanges, 'all port ranges remain available, not truncated');
+  assert.equal(rangeSummary.textContent, 'Ranges: 63 · Assigned ports: 1008', 'count assigned ports, not free or unreserved capacity');
+  rangeDetail.open = true;
+  statusReply = { code: 0, stdout: JSON.stringify({ mape_state: 'up', port_info: '80 443 5000-5002' }) };
+  await view.updateStatus();
+  assert.equal(rangeDetail.open, true, 'polling must not reset the expanded state');
+  assert.equal(rangeDetail.children[1], rangeValue, 'polling must not replace the disclosure');
+  assert.equal(rangeSummary.textContent, 'Ranges: 3 · Assigned ports: 5');
+  assert.equal(rangeValue.textContent, '80 443 5000-5002');
+  statusReply = { code: 0, stdout: '{"mape_state":"up","port_info":"malformed range"}' };
+  await view.updateStatus();
+  assert.equal(rangeSummary.textContent, 'Unknown', 'invalid data must not retain old counts');
+  assert.equal(rangeValue.textContent, 'malformed range', 'keep raw details as text');
   const dropField = fields.find(field => field.id === 's-ct-drop');
   for (const drop of [undefined, null, '', 'bad', -1, [0], {}])
     assert.equal(dropField.get({ conntrack: { drop } }).text, 'Unavailable');
@@ -691,13 +758,18 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   await view.updateStatus();
   assert.equal(elements['s-mape-state'].textContent, 'up', 'older backends still show interface status');
   assert.equal(elements['s-ct-drop'].textContent, 'Unavailable');
+  assert.equal(rangeValue.textContent, '-', 'missing ranges must clear the previous allocation');
+  assert.equal(rangeSummary.textContent, 'Unavailable');
   for (statusReply of [{ code: 1, stdout: '{}' }, { code: 0, stdout: '' },
     { code: 0, stdout: 'not json' }, { code: 0, stdout: 'null' },
     { code: 0, stdout: '[]' }, { code: 0, stdout: '{}' },
     { code: 0, stdout: '{"mape_state":true}' }, new Error('RPC unavailable')]) {
     await view.updateStatus();
     for (const field of fields) assert.equal(elements[field.id].textContent, 'Unavailable', 'do not retain stale successful status');
+    assert.equal(rangeSummary.textContent, 'Unavailable', 'failed refresh must also clear old range counts');
   }
+  assert.equal(rangeDetail.open, true, 'failed refresh preserves the disclosure state while clearing its value');
+  console.log('PASS status ranges: assigned counts, invalid/absent data, collapsed bounded details and stable refreshes');
   console.log('PASS kernel diagnostic UI: zero/unavailable/large counters, old backend, failed refresh and inactive-tab guard');
   console.log(`PASS ${count} backend checks + package/UI structure and shell/JS syntax. Real browser/OpenWrt kernel not exercised.`);
 } finally {

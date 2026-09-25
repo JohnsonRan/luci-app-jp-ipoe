@@ -42,13 +42,43 @@ return view.extend({
 			if (res.code === 0) {
 				var unchanged = args[0] === 'start' && (res.stdout || '').trim() === 'JP_IPOE_UNCHANGED=1';
 				ui.addTimeLimitedNotification(null, E('p', unchanged
-					? _('IPoE configuration already matches the running setup. No restart needed.') : okMessage), 5000, 'info');
+					? _('IPoE is already configured. No restart needed.') : okMessage), 5000, 'info');
 			} else
 				ui.addNotification(null, E('pre', {},
 					(failMessage ? failMessage + '\n' : '') + self.formatCommandOutput(res)), 'error');
 		}).catch(function(e) {
 			ui.addNotification(null, E('p', _('Error executing setup script:') + ' ' + e.message), 'error');
 		});
+	},
+
+	// Count the assigned ranges from mapcalc, not unreserved or idle ports.
+	portRangeSummary: function(text) {
+		if (text == null || text === '-' || text === _('Unavailable'))
+			return _('Unavailable');
+		if (typeof text !== 'string')
+			return _('Unknown');
+		text = text.trim().replace(/^(['"])([\s\S]*)\1$/, '$2').trim();
+		if (!text)
+			return _('Unavailable');
+
+		var ranges = text.split(/[\s,]+/).map(function(token) {
+			var match = token.match(/^(\d+)(?:-(\d+))?$/);
+			if (!match)
+				return null;
+			var first = Number(match[1]), last = Number(match[2] || match[1]);
+			return first >= 1 && last <= 65535 && first <= last ? [first, last] : null;
+		});
+		if (ranges.some(function(range) { return !range; }))
+			return _('Unknown');
+		ranges.sort(function(a, b) { return a[0] - b[0]; });
+		var total = 0;
+		for (var i = 0; i < ranges.length; i++) {
+			// Do not silently double-count malformed overlapping ranges.
+			if (i && ranges[i][0] <= ranges[i - 1][1])
+				return _('Unknown');
+			total += ranges[i][1] - ranges[i][0] + 1;
+		}
+		return _('Ranges: %d · Assigned ports: %d').replace('%d', ranges.length).replace('%d', total);
 	},
 
 	// Single source for the status table: renderStatusPanel builds the rows
@@ -69,10 +99,10 @@ return view.extend({
 			{ id: 's-br-addr', label: _('Border Relay (BR)'), get: function(d) { return { text: d.br_addr || _('Not set'), ok: !!d.br_addr }; } },
 			{ id: 's-port-info', label: _('Assigned Port Ranges'), get: function(d) { return { text: d.port_info || '-' }; } },
 			{ id: 's-pppoe-metric', label: _('PPPoE Fallback Metric'), get: function(d) { return { text: d.pppoe_fallback_metrics || _('None') }; } },
-			{ id: 's-ct-count', label: _('System conntrack entries / limit'), get: function(d) { return { text: counter(d, 'count') + ' / ' + counter(d, 'max') }; } },
-			{ id: 's-ct-insert-failed', label: _('Conntrack insert failures (total)'), get: function(d) { return { text: counter(d, 'insert_failed') }; } },
-			{ id: 's-ct-drop', label: _('Conntrack drops (total)'), get: function(d) { return { text: counter(d, 'drop') }; } },
-			{ id: 's-ct-early-drop', label: _('Conntrack early evictions (total)'), get: function(d) { return { text: counter(d, 'early_drop') }; } }
+			{ id: 's-ct-count', label: _('Conntrack entries / limit'), get: function(d) { return { text: counter(d, 'count') + ' / ' + counter(d, 'max') }; } },
+			{ id: 's-ct-insert-failed', label: _('Conntrack insert failures'), get: function(d) { return { text: counter(d, 'insert_failed') }; } },
+			{ id: 's-ct-drop', label: _('Conntrack drops'), get: function(d) { return { text: counter(d, 'drop') }; } },
+			{ id: 's-ct-early-drop', label: _('Conntrack early evictions'), get: function(d) { return { text: counter(d, 'early_drop') }; } }
 		];
 	},
 
@@ -81,7 +111,7 @@ return view.extend({
 
 		var m, s, o;
 
-		m = new form.Map('jp_ipoe', null, _('Configure OCN Virtual Connect / v6plus (MAP-E) IPoE connection using an existing IPv6 WAN (DHCPv6) interface.'));
+		m = new form.Map('jp_ipoe', null, _('Set up OCN Virtual Connect / v6plus (MAP-E) over an existing DHCPv6 WAN.'));
 
 		s = m.section(form.NamedSection, 'config', 'jp_ipoe', _('Settings'));
 		s.addremove = false;
@@ -101,11 +131,11 @@ return view.extend({
 		o.default = 'wan6mape';
 		o.datatype = 'string';
 
-		o = s.option(form.Flag, 'legacymap', _('Use Legacy MAP'), _('Enable legacy MAP mode. Required for OCN Virtual Connect and v6plus.'));
+		o = s.option(form.Flag, 'legacymap', _('Use Legacy MAP'), _('Required for OCN Virtual Connect and v6plus.'));
 		o.default = o.enabled;
 		o.rmempty = false;
 
-		o = s.option(form.Flag, 'auto', _('Auto Parameters'), _('Automatically derive all MAP-E parameters from the WAN6 IPv6 prefix using the built-in OCN/v6plus rule tables. Disable to enter parameters manually.'));
+		o = s.option(form.Flag, 'auto', _('Auto Parameters'), _('Look up OCN/v6plus parameters from the WAN6 prefix. Disable for manual setup.'));
 		o.default = o.disabled;
 		o.rmempty = false;
 
@@ -155,21 +185,21 @@ return view.extend({
 		o.optional = true;
 		o.depends('auto', '0');
 
-		o = s.option(form.Value, 'dont_snat_to', _('Reserved IPv4 Ports'), _('Space-separated IPv4 ports that should never be selected for MAP-E SNAT. Leave empty unless you intentionally reserve fixed inbound service ports.'));
+		o = s.option(form.Value, 'dont_snat_to', _('Reserved IPv4 Ports'), _('Exclude these IPv4 ports from MAP-E SNAT (space-separated). Leave empty unless reserving inbound ports.'));
 		o.datatype = 'string';
 		o.optional = true;
 		o.placeholder = '2938 7088 10233';
 
-		o = s.option(form.Flag, 'dhcpv6_relay', _('Enable DHCPv6/NDP Relay'), _('Enable this if your ISP provides only an RA /64 prefix without Prefix Delegation (PD). If you have IPv6-PD, uncheck this to use standard Server mode.'));
+		o = s.option(form.Flag, 'dhcpv6_relay', _('Enable DHCPv6/NDP Relay'), _('Enable for RA /64 without prefix delegation (PD). With PD, disable to use server mode.'));
 		o.default = o.enabled;
 		o.rmempty = false;
 
-		var s2 = m.section(form.NamedSection, 'config', 'jp_ipoe', _('Actions'), _('Apply or remove IPoE configuration immediately.'));
+		var s2 = m.section(form.NamedSection, 'config', 'jp_ipoe', _('Actions'));
 
 		var applyIPoE = function(force) {
 			if (force && !window.confirm(_('Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic.')))
 				return;
-			ui.addTimeLimitedNotification(null, E('p', _('Checking IPoE configuration. Changes or repairs may take around 30 seconds.')), 5000, 'info');
+			ui.addTimeLimitedNotification(null, E('p', _('Checking IPoE settings; changes may take about 30 seconds.')), 5000, 'info');
 			return m.save(null, true).then(function() {
 				return self.runSetupAction([force ? 'repair' : 'start'], _('IPoE configuration applied.'));
 			});
@@ -181,7 +211,7 @@ return view.extend({
 
 		o = s2.option(form.Button, '_repair', _('Force Reconnect / Repair'));
 		o.inputstyle = 'negative';
-		o.description = _('Use when IPoE appears connected but does not work. Bypasses the unchanged-configuration check.');
+		o.description = _('Force full setup when IPoE is connected but unusable.');
 		o.onclick = function() { return applyIPoE(true); };
 
 		o = s2.option(form.Button, '_stop', _('Stop IPoE Interfaces'));
@@ -194,14 +224,14 @@ return view.extend({
 
 		o = s2.option(form.Button, '_preview', _('Preview Parameters'));
 		o.inputstyle = 'neutral';
-		o.description = _('Resolve the MAP-E parameters from the current WAN6 IPv6 prefix without applying. Requires WAN6 to have a global IPv6 address.');
+		o.description = _('Preview from the WAN6 prefix without applying. Requires a global WAN6 IPv6 address.');
 		o.onclick = function() {
 			return self.previewParams();
 		};
 
 		o = s2.option(form.Button, '_detect_br', _('Auto-Detect BR Address'));
 		o.inputstyle = 'neutral';
-		o.description = _('Detect the Border Relay address from the live MAP-E rule via mapcalc, then optionally save it and re-apply. Only needed in manual mode; auto mode derives the BR automatically.');
+		o.description = _('Detect BR from the live MAP-E rule, then optionally save and apply. Manual mode only.');
 		o.depends('auto', '0');
 		o.onclick = function() {
 			return self.detectBR();
@@ -327,7 +357,7 @@ return view.extend({
 						E('option', { 'value': 'dual' }, 'IPv4 + IPv6')
 					]))
 				]),
-				E('p', { 'class': 'jp-forward-note' }, _('Device selection fills current addresses only; it does not track MAC or address changes. Verify the address and LAN service first.')),
+				E('p', { 'class': 'jp-forward-note' }, _('Fills current addresses only, without MAC binding. Verify the address and LAN service.')),
 				E('div', { 'class': 'jp-forward-fields' }, [
 					field('jp-forward-proto', _('Protocol'), E('select', { 'id': 'jp-forward-proto', 'class': 'cbi-input-select' }, [
 						E('option', { 'value': 'tcp' }, 'TCP'),
@@ -369,10 +399,10 @@ return view.extend({
 			]),
 			E('details', {}, [
 				E('summary', {}, _('Checks and limitations')),
-				E('p', { 'class': 'jp-forward-note' }, _('IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes.')),
-				E('p', { 'class': 'jp-forward-note' }, _('Both IP versions check the current LAN route. IPv4 also checks port allocation and local NAT conflicts; IPv6 checks duplicate managed rules. Neither verifies service availability or every firewall policy.')),
-				E('p', { 'class': 'jp-forward-note' }, _('Only assigned public IPv4 ports can be forwarded; LAN service ports are unrestricted. Checks cover configured redirects, router bindings and current outbound NAT, not Internet reachability or arbitrary custom nftables rules. Stop UPnP before use.')),
-				E('p', { 'class': 'jp-forward-note' }, _('Rules target the main lan IPv4 subnet. Ports are automatically excluded from outbound NAT without changing manual reservations. A changed public IPv4 or incompatible port allocation suspends the rule; delete and recreate it.'))
+				E('p', { 'class': 'jp-forward-note' }, _('IPv6 rules survive MAP-E stop and plugin uninstall. Delete here or in Firewall traffic rules; recreate after destination IPv6 changes.')),
+				E('p', { 'class': 'jp-forward-note' }, _('Local checks: LAN routes, IPv4 port/NAT conflicts and duplicate managed IPv6 rules. Service availability and other firewall policies are not verified.')),
+				E('p', { 'class': 'jp-forward-note' }, _('IPv4 external ports must be assigned; LAN service ports need not be. Checks cover redirects, router bindings and outbound NAT, not custom nftables rules. Stop UPnP first.')),
+				E('p', { 'class': 'jp-forward-note' }, _('IPv4 targets use the main lan subnet. Ports are reserved from SNAT without changing manual reservations. Public IPv4 or incompatible allocation changes suspend rules; delete and recreate them.'))
 			])
 		];
 	},
@@ -467,7 +497,7 @@ return view.extend({
 		}).catch(function(e) {
 			var allocation = document.getElementById('jp-forward-allocation');
 			if (allocation)
-				allocation.textContent = _('Unable to refresh. The displayed port-forwarding state may be outdated.');
+				allocation.textContent = _('Refresh failed; displayed rules may be outdated.');
 			ui.addNotification(null, E('p', e.message), 'error');
 		});
 	},
@@ -491,12 +521,12 @@ return view.extend({
 			}).join(' / ');
 		ui.showModal(_('Apply Port Forwarding'), [
 			E('p', {}, (proto === 'tcpudp' ? 'TCP + UDP' : proto.toUpperCase()) + ': ' + endpoint),
-			E('p', {}, _('Rules are updated live without restarting MAP-E or clearing existing connections.')),
+			E('p', {}, _('Updates do not restart MAP-E or clear existing connections.')),
 			E('p', {}, adding
-				? _('The selected LAN service will be exposed to the Internet. Secure it before continuing. Local checks cannot guarantee future availability.')
+				? _('This exposes the LAN service to the Internet. Secure it first; local checks do not guarantee future availability.')
 				: _('Deletion removes only this rule. Existing sessions or other firewall rules may still allow access.')),
-			ipv6 ? E('p', {}, _('IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes.')) : '',
-			commands.length > 1 ? E('p', {}, _('Dual stack creates two independent rules. If one fails, review the saved rules before retrying; a successful rule is kept.')) : '',
+			ipv6 ? E('p', {}, _('IPv6 rules survive MAP-E stop and plugin uninstall. Delete here or in Firewall traffic rules; recreate after destination IPv6 changes.')) : '',
+			commands.length > 1 ? E('p', {}, _('Dual stack saves two rules separately. On failure, successful rules remain; check existing rules before retrying.')) : '',
 			E('div', { 'class': 'right' }, [
 				E('button', { 'class': 'btn', 'click': ui.hideModal }, _('Cancel')),
 				' ',
@@ -565,9 +595,8 @@ return view.extend({
 
 	renderStatusPanel: function() {
 		return [
-			E('div', { 'class': 'cbi-map-descr' }, _('Real-time status of the managed MAP-E IPoE interfaces.')),
 			E('div', { 'class': 'cbi-section' }, [
-				E('table', { 'class': 'table cbi-section-table' }, [
+				E('table', { 'class': 'table cbi-section-table', 'style': 'table-layout:fixed;width:100%;overflow-wrap:anywhere;' }, [
 					E('tr', { 'class': 'tr table-titles' }, [
 						E('th', { 'class': 'th' }, _('Item')),
 						E('th', { 'class': 'th' }, _('Value'))
@@ -575,11 +604,18 @@ return view.extend({
 				].concat(this.statusFields().map(function(field, index) {
 					return E('tr', { 'class': 'tr cbi-rowstyle-' + (index % 2 + 1) }, [
 						E('td', { 'class': 'td left' }, field.label),
-						E('td', { 'class': 'td left', 'id': field.id }, '-')
+						field.id === 's-port-info'
+							? E('td', { 'class': 'td left' }, E('details', {}, [
+								E('summary', { 'id': 's-port-info-summary', 'style': 'cursor:pointer;' }, _('Unavailable')),
+								// Refresh only this value, preserving the disclosure's open state.
+								E('div', { 'id': field.id, 'tabindex': '0', 'aria-label': field.label,
+									'style': 'margin-top:.5rem;max-height:12rem;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;font-family:monospace;' }, '-')
+							]))
+							: E('td', { 'class': 'td left', 'id': field.id }, '-')
 					]);
 				})))
 			]),
-			E('p', { 'class': 'cbi-map-descr' }, _('Conntrack statistics cover the whole router, not just MAP-E. Failure and eviction counters are cumulative, not measurements of MAP-E port exhaustion or Internet packet loss. Unavailable means the kernel state could not be read.')),
+			E('p', { 'class': 'cbi-map-descr' }, _('Conntrack covers the whole router. Failure/eviction counters are cumulative, not MAP-E port usage or Internet loss. Unavailable is not zero.')),
 			E('div', { 'class': 'cbi-page-actions', 'style': 'display:flex; gap:8px;' }, [
 				E('button', {
 					'class': 'btn cbi-button cbi-button-action',
@@ -626,6 +662,11 @@ return view.extend({
 			return;
 
 		el.textContent = text || '-';
+		if (id === 's-port-info') {
+			var summary = document.getElementById('s-port-info-summary');
+			if (summary)
+				summary.textContent = this.portRangeSummary(text);
+		}
 		el.style.color = isOk === true ? '#4caf50' : isOk === false ? '#f44336' : '';
 		el.style.fontWeight = isBold === true ? 'bold' : 'normal';
 	},

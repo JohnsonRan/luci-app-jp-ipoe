@@ -9,16 +9,18 @@ msgstr ""
 msgid "Apply IPoE Configuration"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:156
-msgid "Apply or remove IPoE configuration immediately."
-msgstr ""
-
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:161
-msgid "Checking IPoE configuration. Changes or repairs may take around 30 seconds."
+msgid "Checking IPoE settings; changes may take about 30 seconds."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:63
 msgid "Assigned Port Ranges"
+msgstr ""
+
+msgid "Ranges: %d · Assigned ports: %d"
+msgstr ""
+
+msgid "Unknown"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:97
@@ -34,9 +36,7 @@ msgid "Automatically apply configuration on router startup."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:97
-msgid ""
-"Automatically derive all MAP-E parameters from the WAN6 IPv6 prefix using "
-"the built-in OCN/v6plus rule tables. Disable to enter parameters manually."
+msgid "Look up OCN/v6plus parameters from the WAN6 prefix. Disable for manual setup."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:265
@@ -74,9 +74,7 @@ msgid "Configuration"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:73
-msgid ""
-"Configure OCN Virtual Connect / v6plus (MAP-E) IPoE connection using an "
-"existing IPv6 WAN (DHCPv6) interface."
+msgid "Set up OCN Virtual Connect / v6plus (MAP-E) over an existing DHCPv6 WAN."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:271
@@ -84,10 +82,7 @@ msgid "Could not resolve parameters."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:182
-msgid ""
-"Detect the Border Relay address from the live MAP-E rule via mapcalc, then "
-"optionally save it and re-apply. Only needed in manual mode; auto mode "
-"derives the BR automatically."
+msgid "Detect BR from the live MAP-E rule, then optionally save and apply. Manual mode only."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:341
@@ -115,14 +110,11 @@ msgid "Enable at Boot"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:93
-msgid "Enable legacy MAP mode. Required for OCN Virtual Connect and v6plus."
+msgid "Required for OCN Virtual Connect and v6plus."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:152
-msgid ""
-"Enable this if your ISP provides only an RA /64 prefix without Prefix "
-"Delegation (PD). If you have IPv6-PD, uncheck this to use standard Server "
-"mode."
+msgid "Enable for RA /64 without prefix delegation (PD). With PD, disable to use server mode."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:48
@@ -278,10 +270,6 @@ msgstr ""
 msgid "Preview Parameters"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:280
-msgid "Real-time status of the managed MAP-E IPoE interfaces."
-msgstr ""
-
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:300
 msgid "Refresh"
 msgstr ""
@@ -291,9 +279,7 @@ msgid "Reserved IPv4 Ports"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:175
-msgid ""
-"Resolve the MAP-E parameters from the current WAN6 IPv6 prefix without "
-"applying. Requires WAN6 to have a global IPv6 address."
+msgid "Preview from the WAN6 prefix without applying. Requires a global WAN6 IPv6 address."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:253
@@ -323,9 +309,7 @@ msgid "Setup script exited with code:"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:147
-msgid ""
-"Space-separated IPv4 ports that should never be selected for MAP-E SNAT. "
-"Leave empty unless you intentionally reserve fixed inbound service ports."
+msgid "Exclude these IPv4 ports from MAP-E SNAT (space-separated). Leave empty unless reserving inbound ports."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:213
@@ -367,10 +351,10 @@ msgstr ""
 msgid "Port Forwarding"
 msgstr ""
 
-msgid "Only assigned public IPv4 ports can be forwarded; LAN service ports are unrestricted. Checks cover configured redirects, router bindings and current outbound NAT, not Internet reachability or arbitrary custom nftables rules. Stop UPnP before use."
+msgid "IPv4 external ports must be assigned; LAN service ports need not be. Checks cover redirects, router bindings and outbound NAT, not custom nftables rules. Stop UPnP first."
 msgstr ""
 
-msgid "Rules target the main lan IPv4 subnet. Ports are automatically excluded from outbound NAT without changing manual reservations. A changed public IPv4 or incompatible port allocation suspends the rule; delete and recreate it."
+msgid "IPv4 targets use the main lan subnet. Ports are reserved from SNAT without changing manual reservations. Public IPv4 or incompatible allocation changes suspend rules; delete and recreate them."
 msgstr ""
 
 msgid "Protocol"
@@ -406,10 +390,10 @@ msgstr ""
 msgid "Apply Port Forwarding"
 msgstr ""
 
-msgid "Rules are updated live without restarting MAP-E or clearing existing connections."
+msgid "Updates do not restart MAP-E or clear existing connections."
 msgstr ""
 
-msgid "The selected LAN service will be exposed to the Internet. Secure it before continuing. Local checks cannot guarantee future availability."
+msgid "This exposes the LAN service to the Internet. Secure it first; local checks do not guarantee future availability."
 msgstr ""
 
 msgid "Port forward removed."
@@ -424,7 +408,7 @@ msgstr ""
 msgid "Stop MAP-E now? IPv4 traffic using IPoE will be interrupted."
 msgstr ""
 
-msgid "Unable to refresh. The displayed port-forwarding state may be outdated."
+msgid "Refresh failed; displayed rules may be outdated."
 msgstr ""
 
 msgid "A port-forwarding operation is in progress. Please wait."
@@ -433,7 +417,7 @@ msgstr ""
 msgid "Automatic port"
 msgstr ""
 
-msgid "IPoE configuration already matches the running setup. No restart needed."
+msgid "IPoE is already configured. No restart needed."
 msgstr ""
 
 msgid "Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic."
@@ -442,7 +426,7 @@ msgstr ""
 msgid "Force Reconnect / Repair"
 msgstr ""
 
-msgid "Use when IPoE appears connected but does not work. Bypasses the unchanged-configuration check."
+msgid "Force full setup when IPoE is connected but unusable."
 msgstr ""
 
 msgid "Public IPv4"
@@ -487,7 +471,7 @@ msgstr ""
 msgid "IP version"
 msgstr ""
 
-msgid "Device selection fills current addresses only; it does not track MAC or address changes. Verify the address and LAN service first."
+msgid "Fills current addresses only, without MAC binding. Verify the address and LAN service."
 msgstr ""
 
 msgid "Device public IPv6"
@@ -496,10 +480,10 @@ msgstr ""
 msgid "Service Port"
 msgstr ""
 
-msgid "IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes."
+msgid "IPv6 rules survive MAP-E stop and plugin uninstall. Delete here or in Firewall traffic rules; recreate after destination IPv6 changes."
 msgstr ""
 
-msgid "Both IP versions check the current LAN route. IPv4 also checks port allocation and local NAT conflicts; IPv6 checks duplicate managed rules. Neither verifies service availability or every firewall policy."
+msgid "Local checks: LAN routes, IPv4 port/NAT conflicts and duplicate managed IPv6 rules. Service availability and other firewall policies are not verified."
 msgstr ""
 
 msgid "Unable to load devices. Enter addresses manually."
@@ -520,7 +504,7 @@ msgstr ""
 msgid "Deletion removes only this rule. Existing sessions or other firewall rules may still allow access."
 msgstr ""
 
-msgid "Dual stack creates two independent rules. If one fails, review the saved rules before retrying; a successful rule is kept."
+msgid "Dual stack saves two rules separately. On failure, successful rules remain; check existing rules before retrying."
 msgstr ""
 
 msgid "Partial completion is possible. Review existing rules before retrying."
@@ -529,17 +513,17 @@ msgstr ""
 msgid "Unavailable"
 msgstr ""
 
-msgid "System conntrack entries / limit"
+msgid "Conntrack entries / limit"
 msgstr ""
 
-msgid "Conntrack insert failures (total)"
+msgid "Conntrack insert failures"
 msgstr ""
 
-msgid "Conntrack drops (total)"
+msgid "Conntrack drops"
 msgstr ""
 
-msgid "Conntrack early evictions (total)"
+msgid "Conntrack early evictions"
 msgstr ""
 
-msgid "Conntrack statistics cover the whole router, not just MAP-E. Failure and eviction counters are cumulative, not measurements of MAP-E port exhaustion or Internet packet loss. Unavailable means the kernel state could not be read."
+msgid "Conntrack covers the whole router. Failure/eviction counters are cumulative, not MAP-E port usage or Internet loss. Unavailable is not zero."
 msgstr ""

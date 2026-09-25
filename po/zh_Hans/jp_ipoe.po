@@ -19,17 +19,19 @@ msgstr "操作"
 msgid "Apply IPoE Configuration"
 msgstr "应用 IPoE 配置"
 
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:156
-msgid "Apply or remove IPoE configuration immediately."
-msgstr "立即应用或移除 IPoE 配置。"
-
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:161
-msgid "Checking IPoE configuration. Changes or repairs may take around 30 seconds."
-msgstr "正在检查 IPoE 配置；如需应用变更或修复，可能需要约 30 秒。"
+msgid "Checking IPoE settings; changes may take about 30 seconds."
+msgstr "正在检查配置，应用变更可能需约 30 秒。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:63
 msgid "Assigned Port Ranges"
 msgstr "已分配端口范围"
+
+msgid "Ranges: %d · Assigned ports: %d"
+msgstr "%d 段 · %d 个已分配端口"
+
+msgid "Unknown"
+msgstr "未知"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:97
 msgid "Auto Parameters"
@@ -44,10 +46,8 @@ msgid "Automatically apply configuration on router startup."
 msgstr "路由器启动时自动应用配置。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:97
-msgid ""
-"Automatically derive all MAP-E parameters from the WAN6 IPv6 prefix using "
-"the built-in OCN/v6plus rule tables. Disable to enter parameters manually."
-msgstr "使用内置的 OCN/v6プラス 规则表，从 WAN6 的 IPv6 前缀自动推导所有 MAP-E 参数。关闭后可手动输入参数。"
+msgid "Look up OCN/v6plus parameters from the WAN6 prefix. Disable for manual setup."
+msgstr "按 WAN6 前缀查找 OCN/v6plus 参数；关闭后手动填写。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:265
 msgid "BR"
@@ -84,23 +84,16 @@ msgid "Configuration"
 msgstr "配置"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:73
-msgid ""
-"Configure OCN Virtual Connect / v6plus (MAP-E) IPoE connection using an "
-"existing IPv6 WAN (DHCPv6) interface."
-msgstr "配置 OCN バーチャルコネクト / v6プラス（MAP-E）IPoE 连接，使用已有的 IPv6 WAN（DHCPv6）接口。"
+msgid "Set up OCN Virtual Connect / v6plus (MAP-E) over an existing DHCPv6 WAN."
+msgstr "使用现有 DHCPv6 WAN 配置 OCN Virtual Connect / v6plus（MAP-E）。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:271
 msgid "Could not resolve parameters."
 msgstr "无法解析参数。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:182
-msgid ""
-"Detect the Border Relay address from the live MAP-E rule via mapcalc, then "
-"optionally save it and re-apply. Only needed in manual mode; auto mode "
-"derives the BR automatically."
-msgstr ""
-"通过 mapcalc 从实时 MAP-E 规则检测 Border Relay 地址，然后可选择保存并重新应"
-"用。仅手动模式需要；自动模式会自动推导 BR。"
+msgid "Detect BR from the live MAP-E rule, then optionally save and apply. Manual mode only."
+msgstr "从当前 MAP-E 规则检测 BR，可选择保存并应用。仅手动模式需要。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:341
 msgid "Detecting BR address via mapcalc..."
@@ -127,15 +120,12 @@ msgid "Enable at Boot"
 msgstr "开机时自动启用"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:93
-msgid "Enable legacy MAP mode. Required for OCN Virtual Connect and v6plus."
-msgstr "启用 Legacy MAP 模式，OCN バーチャルコネクト 和 v6プラス 必须开启。"
+msgid "Required for OCN Virtual Connect and v6plus."
+msgstr "OCN Virtual Connect 和 v6plus 必须开启。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:152
-msgid ""
-"Enable this if your ISP provides only an RA /64 prefix without Prefix "
-"Delegation (PD). If you have IPv6-PD, uncheck this to use standard Server "
-"mode."
-msgstr "若你的 ISP 不提供 IPv6 PD，则启用该选项"
+msgid "Enable for RA /64 without prefix delegation (PD). With PD, disable to use server mode."
+msgstr "仅有 RA /64、无 PD 时开启；有 PD 时关闭，使用服务器模式。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:48
 msgid "Error executing setup script:"
@@ -147,7 +137,7 @@ msgstr "错误："
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:354
 msgid "Failed to parse detection result"
-msgstr "无法传递检测结果"
+msgstr "解析检测结果失败"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:323
 msgid "Failed to parse status"
@@ -272,7 +262,7 @@ msgstr "未设置"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:64
 msgid "PPPoE Fallback Metric"
-msgstr "PPPoE 回退跃点"
+msgstr "PPPoE 备用路由度量"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:135
 msgid "PSID bits length"
@@ -290,10 +280,6 @@ msgstr "用于 WAN 连接的物理网络设备（例如 eth0）。"
 msgid "Preview Parameters"
 msgstr "预览参数"
 
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:280
-msgid "Real-time status of the managed MAP-E IPoE interfaces."
-msgstr "MAP-E IPoE 接口的实时状态。"
-
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:300
 msgid "Refresh"
 msgstr "刷新"
@@ -303,12 +289,8 @@ msgid "Reserved IPv4 Ports"
 msgstr "保留的 IPv4 端口"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:175
-msgid ""
-"Resolve the MAP-E parameters from the current WAN6 IPv6 prefix without "
-"applying. Requires WAN6 to have a global IPv6 address."
-msgstr ""
-"从当前 WAN6 IPv6 前缀解析 MAP-E 参数，不会立即应用。需要 WAN6 已获取全局 "
-"IPv6 地址。"
+msgid "Preview from the WAN6 prefix without applying. Requires a global WAN6 IPv6 address."
+msgstr "按 WAN6 前缀预览，不应用配置；WAN6 须有全局 IPv6 地址。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:253
 msgid "Resolving parameters from WAN6 prefix..."
@@ -337,12 +319,8 @@ msgid "Setup script exited with code:"
 msgstr "配置脚本退出代码："
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:147
-msgid ""
-"Space-separated IPv4 ports that should never be selected for MAP-E SNAT. "
-"Leave empty unless you intentionally reserve fixed inbound service ports."
-msgstr ""
-"以空格分隔的 IPv4 端口列表，这些端口不会被用于 MAP-E SNAT。除非你明确要为入站"
-"服务保留固定端口，否则保持为空即可。"
+msgid "Exclude these IPv4 ports from MAP-E SNAT (space-separated). Leave empty unless reserving inbound ports."
+msgstr "这些 IPv4 端口不用于 MAP-E SNAT，以空格分隔。无需手动预留入站端口时留空。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:213
 msgid "Status"
@@ -378,16 +356,16 @@ msgstr "WAN6 接口"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:268
 msgid "offset"
-msgstr "offset"
+msgstr "偏移"
 
 msgid "Port Forwarding"
 msgstr "端口转发"
 
-msgid "Only assigned public IPv4 ports can be forwarded; LAN service ports are unrestricted. Checks cover configured redirects, router bindings and current outbound NAT, not Internet reachability or arbitrary custom nftables rules. Stop UPnP before use."
-msgstr "只有分配到的公网 IPv4 端口可用于转发，内网服务端口不受此限制。检查覆盖已配置的转发规则、路由器绑定端口和当前出站 NAT，不代表公网可达，也不检查任意自定义 nftables 规则。使用前请停止 UPnP。"
+msgid "IPv4 external ports must be assigned; LAN service ports need not be. Checks cover redirects, router bindings and outbound NAT, not custom nftables rules. Stop UPnP first."
+msgstr "IPv4 外部端口须在分配范围内，内网端口不限于此。检查涵盖转发规则、路由器端口及出站 NAT，不含自定义 nftables 规则。使用前停止 UPnP。"
 
-msgid "Rules target the main lan IPv4 subnet. Ports are automatically excluded from outbound NAT without changing manual reservations. A changed public IPv4 or incompatible port allocation suspends the rule; delete and recreate it."
-msgstr "目标须位于主 lan 接口的 IPv4 子网。转发端口自动从出站 NAT 池排除，不修改手工保留端口。公网 IPv4 改变或端口不再属于分配范围时，规则暂停，请删除后重新创建。"
+msgid "IPv4 targets use the main lan subnet. Ports are reserved from SNAT without changing manual reservations. Public IPv4 or incompatible allocation changes suspend rules; delete and recreate them."
+msgstr "IPv4 目标须在主 lan 子网。转发端口不用于出站 NAT，手动预留不变。公网 IPv4 变更或端口分配不兼容会暂停规则，请删除后重建。"
 
 msgid "Protocol"
 msgstr "协议"
@@ -422,11 +400,11 @@ msgstr "尚未创建端口转发。"
 msgid "Apply Port Forwarding"
 msgstr "应用端口转发"
 
-msgid "Rules are updated live without restarting MAP-E or clearing existing connections."
-msgstr "规则将实时更新，不会重启 MAP-E 或清除现有连接。"
+msgid "Updates do not restart MAP-E or clear existing connections."
+msgstr "更新规则不重启 MAP-E，也不清除已有连接。"
 
-msgid "The selected LAN service will be exposed to the Internet. Secure it before continuing. Local checks cannot guarantee future availability."
-msgstr "选定的内网服务将开放到公网，请先确保服务安全。本地检查不能保证端口今后始终可用。"
+msgid "This exposes the LAN service to the Internet. Secure it first; local checks do not guarantee future availability."
+msgstr "这会向公网开放内网服务，请先确保安全。本地检查不保证今后始终可用。"
 
 msgid "Port forward removed."
 msgstr "端口转发已删除。"
@@ -440,8 +418,8 @@ msgstr "确认"
 msgid "Stop MAP-E now? IPv4 traffic using IPoE will be interrupted."
 msgstr "现在停止 MAP-E？通过 IPoE 传输的 IPv4 流量将中断。"
 
-msgid "Unable to refresh. The displayed port-forwarding state may be outdated."
-msgstr "刷新失败，当前显示的端口转发状态可能已过期。"
+msgid "Refresh failed; displayed rules may be outdated."
+msgstr "刷新失败，所示规则可能已过期。"
 
 msgid "A port-forwarding operation is in progress. Please wait."
 msgstr "端口转发操作正在进行，请稍候。"
@@ -449,8 +427,8 @@ msgstr "端口转发操作正在进行，请稍候。"
 msgid "Automatic port"
 msgstr "自动选择端口"
 
-msgid "IPoE configuration already matches the running setup. No restart needed."
-msgstr "IPoE 配置与当前运行状态一致，无需重启。"
+msgid "IPoE is already configured. No restart needed."
+msgstr "配置已生效，无需重启。"
 
 msgid "Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic."
 msgstr "强制重连并修复 IPoE？这将执行完整配置流程，可能中断 IPv4 和 IPv6 流量。"
@@ -458,8 +436,8 @@ msgstr "强制重连并修复 IPoE？这将执行完整配置流程，可能中�
 msgid "Force Reconnect / Repair"
 msgstr "强制重连 / 修复"
 
-msgid "Use when IPoE appears connected but does not work. Bypasses the unchanged-configuration check."
-msgstr "用于 IPoE 显示已连接但实际不可用的情况，将跳过配置未变化检查。"
+msgid "Force full setup when IPoE is connected but unusable."
+msgstr "已连接但无法使用时，强制重新配置。"
 
 msgid "Public IPv4"
 msgstr "公网 IPv4"
@@ -503,8 +481,8 @@ msgstr "手动输入地址"
 msgid "IP version"
 msgstr "IP 版本"
 
-msgid "Device selection fills current addresses only; it does not track MAC or address changes. Verify the address and LAN service first."
-msgstr "设备选择仅填入当前地址，不会跟随 MAC 或地址变化。请先核对地址并确认内网服务可达。"
+msgid "Fills current addresses only, without MAC binding. Verify the address and LAN service."
+msgstr "仅填入当前地址，不绑定 MAC；请核对地址和内网服务。"
 
 msgid "Device public IPv6"
 msgstr "设备公网 IPv6"
@@ -512,11 +490,11 @@ msgstr "设备公网 IPv6"
 msgid "Service Port"
 msgstr "服务端口"
 
-msgid "IPv6 rules persist independently of MAP-E, including after stop or uninstall. Delete them explicitly here or in Firewall traffic rules. Recreate them after IPv6 address changes."
-msgstr "IPv6 放行规则独立持久保存，停止或卸载本插件也不会撤销。请在此处或防火墙通信规则中单独删除；IPv6 地址变化后需重新创建。"
+msgid "IPv6 rules survive MAP-E stop and plugin uninstall. Delete here or in Firewall traffic rules; recreate after destination IPv6 changes."
+msgstr "停止 MAP-E 或卸载插件不会删除 IPv6 规则；请在此处或防火墙通信规则中删除。目标 IPv6 变化后须重建。"
 
-msgid "Both IP versions check the current LAN route. IPv4 also checks port allocation and local NAT conflicts; IPv6 checks duplicate managed rules. Neither verifies service availability or every firewall policy."
-msgstr "IPv4 和 IPv6 均检查当前 LAN 路由。IPv4 还检查端口分配与本地 NAT 冲突，IPv6 还检查本插件规则重复；两者均不验证服务可用性或所有防火墙策略。"
+msgid "Local checks: LAN routes, IPv4 port/NAT conflicts and duplicate managed IPv6 rules. Service availability and other firewall policies are not verified."
+msgstr "仅检查 LAN 路由、IPv4 端口/NAT 冲突和 IPv6 管理规则重复；不验证服务可达性或其他防火墙策略。"
 
 msgid "Unable to load devices. Enter addresses manually."
 msgstr "无法加载设备列表，请手动输入地址。"
@@ -536,8 +514,8 @@ msgstr "无法确认防火墙运行状态"
 msgid "Deletion removes only this rule. Existing sessions or other firewall rules may still allow access."
 msgstr "删除仅撤销本条规则。已有连接或其他防火墙规则可能仍允许访问。"
 
-msgid "Dual stack creates two independent rules. If one fails, review the saved rules before retrying; a successful rule is kept."
-msgstr "双栈会分别创建两条独立规则。如其中一条失败，已成功的规则会保留；请检查已有规则后再补充失败的一项。"
+msgid "Dual stack saves two rules separately. On failure, successful rules remain; check existing rules before retrying."
+msgstr "双栈分别保存两条规则；失败时已成功的规则会保留，请检查后再重试。"
 
 msgid "Partial completion is possible. Review existing rules before retrying."
 msgstr "操作可能仅部分完成，请先检查已有规则再重试。"
@@ -545,17 +523,17 @@ msgstr "操作可能仅部分完成，请先检查已有规则再重试。"
 msgid "Unavailable"
 msgstr "无法读取"
 
-msgid "System conntrack entries / limit"
-msgstr "系统连接跟踪条目 / 上限"
+msgid "Conntrack entries / limit"
+msgstr "连接跟踪条目 / 上限"
 
-msgid "Conntrack insert failures (total)"
-msgstr "连接跟踪插入失败数（累计）"
+msgid "Conntrack insert failures"
+msgstr "连接跟踪插入失败"
 
-msgid "Conntrack drops (total)"
-msgstr "连接跟踪丢弃数（累计）"
+msgid "Conntrack drops"
+msgstr "连接跟踪丢弃"
 
-msgid "Conntrack early evictions (total)"
-msgstr "连接跟踪提前回收数（累计）"
+msgid "Conntrack early evictions"
+msgstr "连接跟踪提前回收"
 
-msgid "Conntrack statistics cover the whole router, not just MAP-E. Failure and eviction counters are cumulative, not measurements of MAP-E port exhaustion or Internet packet loss. Unavailable means the kernel state could not be read."
-msgstr "连接跟踪统计覆盖整个路由器，并非仅针对 MAP-E。失败和回收计数为累计值，不代表 MAP-E 端口耗尽或互联网丢包情况。“无法读取”表示未能读取内核运行状态。"
+msgid "Conntrack covers the whole router. Failure/eviction counters are cumulative, not MAP-E port usage or Internet loss. Unavailable is not zero."
+msgstr "连接跟踪统计覆盖全路由器；失败/回收为累计值，不代表 MAP-E 端口用量或公网丢包。无法读取不等于零。"
