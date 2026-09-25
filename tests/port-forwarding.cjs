@@ -429,6 +429,126 @@ done
 `, command);
 
   const setup = stripSources(read('root/usr/sbin/jp-ipoe-setup')).split('# Entry point')[0];
+  const uciFaults = `
+uci() {
+ if [ "$1 $2" = '-q get' ]; then printf '%s\\n' present; return 0; fi
+ WRITES=$((WRITES + 1))
+ [ "$WRITES" != "$FAIL_AT" ]
+}
+check_writes() {
+ FAIL_AT=0; WRITES=0
+ "$@" || fail "baseline $*"
+ total=$WRITES
+ [ "$total" -gt 0 ] || fail no-writes
+ for FAIL_AT in $(seq 1 "$total"); do
+  WRITES=0
+  "$@" && fail "ignored write $FAIL_AT in $*"
+  [ "$WRITES" = "$FAIL_AT" ] || fail "continued writes after $FAIL_AT in $*"
+ done
+}
+`;
+  run('WAN6 UCI failures stop writes and report failure', `
+ensure_wan6_duid_ll() { uci set network.access6.clientid=test; }
+check_writes setup_wan6 eth0 access6
+find_network_device_section() { echo wan_dev; }
+check_writes ensure_wan_device_ipv6 eth0
+get_ipv6_prefix() { echo 2001:db8::/64; }
+ifup() { :; }
+wait_for_ipv6() { :; }
+AUTO=1
+check_writes ensure_wan6_ip6prefix access6 eth0
+`, setup + uciFaults);
+
+  run('MAP-E UCI failures stop writes for set and clear paths', `
+resolve_br_addr() { echo 2001:db8::1; }
+for bounds in set clear; do
+ if [ "$bounds" = set ]; then IPADDR=203.0.113.1; IP4PREFIXLEN=32; else IPADDR=''; IP4PREFIXLEN=''; fi
+ for legacy in 0 1; do check_writes setup_mape ip4map access6 2001:db8::1 "$legacy"; done
+done
+`, setup + uciFaults);
+
+  run('firewall UCI failures stop membership and fallback metric writes', `
+resolve_ipoe_firewall_zone() { echo wan; }
+check_writes setup_firewall access6 ip4map
+find_wan_pppoe_sections() { echo 'wan backup'; }
+check_writes setup_pppoe_fallback_metrics
+`, setup + uciFaults);
+
+  run('DHCP UCI failures stop writes in relay and server modes', `
+odhcpd_mock() { :; }
+check_writes configure_dhcpv6_relay access6 1
+check_writes configure_dhcpv6_relay access6 0
+`, setup.replaceAll('/etc/init.d/odhcpd', 'odhcpd_mock') + uciFaults);
+
+  run('required services fail closed and tunnel bringup failures invoke rollback', `
+ifup() { return 1; }
+fw4() { fail reload-after-ifup-failure; }
+bringup_mape && fail ignored-ifup
+ifup() { :; }
+fw4() { return 1; }
+bringup_mape && fail ignored-fw4
+uci() { return 0; }
+odhcpd_mock() { return 1; }
+configure_dhcpv6_relay access6 1 && fail ignored-odhcpd
+validate_config() { :; }; apply_map_protocol() { :; }
+apply_network_config() { :; }; apply_firewall_config() { :; }; apply_dhcp_config() { :; }
+rollback_failed_start() { ROLLED_BACK=1; }
+run_start_pipeline && fail ignored-bringup
+[ "$ROLLED_BACK" = 1 ] || fail missing-rollback
+`, setup.replaceAll('/etc/init.d/odhcpd', 'odhcpd_mock'));
+
+  run('failed partial MAP creation is removed, and next start succeeds without foreign writes', `
+WAN6_IFACE=access6; MAPE_IFACE=ip4map
+DB_network_access6_TYPE=interface; DB_network_access6_proto=dhcpv6
+uci() {
+ [ "$1" != -q ] || shift
+ local op="$1" key="$2" value name
+ case "$op" in
+  commit) [ "$key" = network ] || fail foreign-commit; return 0;;
+  get) name="DB_$(printf '%s' "$key" | tr . _)"; [ "$key" != network.ip4map ] || name=DB_network_ip4map_TYPE
+   eval "value=\\\"\\\${$name-}\\\""; [ -n "$value" ] || return 1; printf '%s' "$value"; return 0;;
+  set) value="\${key#*=}"; key="\${key%%=*}";;
+  delete) value='';;
+  *) fail unexpected-uci;;
+ esac
+ case "$key" in network.ip4map|network.ip4map.*) ;; *) fail "foreign write $key";; esac
+ if [ "$FAIL_KEY" = "$key" ]; then FAIL_KEY=''; return 1; fi
+ name="DB_$(printf '%s' "$key" | tr . _)"
+ [ "$key" != network.ip4map ] || name=DB_network_ip4map_TYPE
+ export "$name=$value"
+}
+resolve_br_addr() { echo 2001:db8::1; }
+validate_config() { validate_interface_roles; }
+apply_map_protocol() { :; }
+apply_network_config() { setup_mape ip4map access6 2001:db8::1 1; }
+apply_firewall_config() { :; }; apply_dhcp_config() { :; }; bringup_mape() { :; }
+stop_managed_interfaces() { :; }; remove_firewall_network() { :; }; remove_managed_wan6_state() { :; }
+for FAIL_KEY in network.ip4map.proto network.ip4map.maptype network.ip4map.tunlink; do
+ DB_network_ip4map_TYPE=''; DB_network_ip4map_proto=''; DB_network_ip4map_tunlink=''
+ JP_IPOE_CREATED_MAPE=''
+ run_start_pipeline && fail ignored-write
+ [ -z "$DB_network_ip4map_TYPE" ] || fail leftover-partial-section
+ run_start_pipeline || fail retry
+ [ "$DB_network_ip4map_tunlink" = access6 ] || fail incomplete-retry
+done
+`, setup);
+
+  run('cleanup failures are reported and do not continue deleting managed state', `
+find_firewall_zone() { echo wan; }
+fw4() { :; }
+check_writes remove_firewall_network ip4map
+WAN6_IFACE=access6
+remove_mape_with_owner() { JP_IPOE_CREATED_MAPE=ip4map; remove_mape_config ip4map; }
+check_writes remove_mape_with_owner
+check_writes remove_managed_wan6_state
+stop_managed_interfaces() { :; }
+remove_firewall_network() { return 1; }
+remove_mape_config() { fail continued-delete; }
+remove_managed_wan6_state() { fail continued-prefix-delete; }
+rollback_failed_start && fail ignored-cleanup-failure
+exit 0
+`, setup + uciFaults);
+
   run('DHCP modes: relay and PD server mode both reach tunnel bringup without rollback', `
 uci() { printf '%s\\n' "$*" >> "$TEST_TMP/dhcp-log"; }
 odhcpd_mock() { [ "$1" = restart ] || fail service-action; }
@@ -647,7 +767,7 @@ exit 0
   assert.equal((log.match(/PIPELINE/g) || []).length, 2);
   assert.equal((log.match(/COMMIT/g) || []).length, 3);
   assert.equal((log.match(/STOP/g) || []).length, 1);
-  assert.match(setup, /restart_wan6_interface "\$WAN6_IFACE" \|\| true\s+cmd_start force/);
+  assert.match(setup, /restart_wan6_interface "\$WAN6_IFACE" \|\| return 1\s+cmd_start force/);
 
   const locked = run('locked operations attempt PPPoE restoration after both success and failure', `
 LOCK_DIR="$TEST_TMP/setup-lock"

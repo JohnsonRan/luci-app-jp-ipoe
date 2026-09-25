@@ -43,6 +43,7 @@ FIREWALL_ZONE_MATCH=""
 PPPOE_SECTION_MATCHES=""
 NETWORK_DEVICE_MATCH=""
 JP_IPOE_STOPPED_PPPOE=""
+JP_IPOE_CREATED_MAPE=""
 
 firewall_zone_find_by_name_cb() {
 	local section="$1"
@@ -184,8 +185,8 @@ jp_ipoe_uci_set_or_delete_option() {
 
 	if [ -n "$value" ]; then
 		uci set "$package.$section.$option=$value"
-	else
-		uci delete "$package.$section.$option" 2>/dev/null || true
+	elif uci -q get "$package.$section.$option" >/dev/null 2>&1; then
+		uci delete "$package.$section.$option"
 	fi
 }
 
@@ -306,7 +307,7 @@ ensure_wan_device_ipv6() {
 		return 0
 	}
 
-	uci set network."$section".ipv6="1"
+	uci set network."$section".ipv6="1" || return 1
 	log "Enabled IPv6 on device $device."
 }
 
@@ -404,9 +405,9 @@ ensure_wan6_ip6prefix() {
 	fi
 
 	log "Setting $wan6_iface ip6prefix to $ip6prefix for MAP-E startup"
-	uci set network."$wan6_iface".ip6prefix="$ip6prefix"
-	uci commit network
-	ifup "$wan6_iface" 2>/dev/null || true
+	uci set network."$wan6_iface".ip6prefix="$ip6prefix" || return 1
+	uci commit network || return 1
+	ifup "$wan6_iface" 2>/dev/null || return 1
 	wait_for_ipv6 "$wan6_iface" "$WAN6_RECOVERY_WAIT_TIMEOUT" >/dev/null || return 1
 }
 
@@ -422,15 +423,15 @@ setup_wan6() {
 		return 1
 	fi
 
-	uci set network."$iface".device="$device"
-	uci set network."$iface".proto=dhcpv6
-	uci set network."$iface".reqaddress=try
-	uci set network."$iface".reqprefix=auto
-	uci set network."$iface".ip6assign='64'
+	uci set network."$iface".device="$device" || return 1
+	uci set network."$iface".proto=dhcpv6 || return 1
+	uci set network."$iface".reqaddress=try || return 1
+	uci set network."$iface".reqprefix=auto || return 1
+	uci set network."$iface".ip6assign='64' || return 1
 	ensure_wan6_duid_ll "$iface" "$device" || return 1
-	uci delete network."$iface".ip6prefix 2>/dev/null || true
+	jp_ipoe_uci_set_or_delete_option network "$iface" ip6prefix "" || return 1
 
-	uci commit network
+	uci commit network || return 1
 	log "WAN6 interface $iface configured"
 }
 
@@ -474,31 +475,32 @@ setup_mape() {
 
 	# Create/update MAP-E interface
 	if ! uci -q get network."$mape_iface" >/dev/null 2>&1; then
-		uci set network."$mape_iface"=interface
+		uci set network."$mape_iface"=interface || return 1
+		JP_IPOE_CREATED_MAPE="$mape_iface"
 	fi
 
-	uci set network."$mape_iface".proto=map
-	uci set network."$mape_iface".maptype=map-e
-	uci set network."$mape_iface".peeraddr="$br_addr"
-	uci set network."$mape_iface".tunlink="$wan6_iface"
-	uci set network."$mape_iface".encaplimit=ignore
-	uci set network."$mape_iface".mtu="$MAPE_MTU"
+	uci set network."$mape_iface".proto=map || return 1
+	uci set network."$mape_iface".maptype=map-e || return 1
+	uci set network."$mape_iface".peeraddr="$br_addr" || return 1
+	uci set network."$mape_iface".tunlink="$wan6_iface" || return 1
+	uci set network."$mape_iface".encaplimit=ignore || return 1
+	uci set network."$mape_iface".mtu="$MAPE_MTU" || return 1
 	if [ "$legacymap" = "1" ]; then
-		uci set network."$mape_iface".legacymap=1
+		uci set network."$mape_iface".legacymap=1 || return 1
 	else
-		uci delete network."$mape_iface".legacymap 2>/dev/null || true
+		jp_ipoe_uci_set_or_delete_option network "$mape_iface" legacymap "" || return 1
 	fi
 
 	# Populate advanced manual MAP-E bounds if set
-	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ipaddr "$IPADDR"
-	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ip4prefixlen "$IP4PREFIXLEN"
-	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ip6prefix "$IP6PREFIX"
-	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ip6prefixlen "$IP6PREFIXLEN"
-	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ealen "$EALEN"
-	jp_ipoe_uci_set_or_delete_option network "$mape_iface" psidlen "$PSIDLEN"
-	jp_ipoe_uci_set_or_delete_option network "$mape_iface" offset "$OFFSET"
+	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ipaddr "$IPADDR" || return 1
+	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ip4prefixlen "$IP4PREFIXLEN" || return 1
+	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ip6prefix "$IP6PREFIX" || return 1
+	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ip6prefixlen "$IP6PREFIXLEN" || return 1
+	jp_ipoe_uci_set_or_delete_option network "$mape_iface" ealen "$EALEN" || return 1
+	jp_ipoe_uci_set_or_delete_option network "$mape_iface" psidlen "$PSIDLEN" || return 1
+	jp_ipoe_uci_set_or_delete_option network "$mape_iface" offset "$OFFSET" || return 1
 
-	uci commit network
+	uci commit network || return 1
 	log "MAP-E interface $mape_iface configured with BR $br_addr and MTU $MAPE_MTU"
 }
 
@@ -521,7 +523,7 @@ setup_firewall() {
 		if list_contains networks "$iface"; then
 			log "$iface already in WAN firewall zone"
 		else
-			uci add_list firewall."$wan_zone".network="$iface"
+			uci add_list firewall."$wan_zone".network="$iface" || return 1
 			append networks "$iface"
 			log "Added $iface to WAN firewall zone"
 		fi
@@ -538,7 +540,7 @@ setup_pppoe_fallback_metrics() {
 	[ -n "$sections_to_update" ] || return 0
 
 	for section in $sections_to_update; do
-		uci set network."$section".metric="$PPPOE_FALLBACK_METRIC"
+		uci set network."$section".metric="$PPPOE_FALLBACK_METRIC" || return 1
 		log "Set PPPoE fallback metric $PPPOE_FALLBACK_METRIC on $section"
 	done
 
@@ -601,7 +603,7 @@ restart_wan6_interface() {
 	log "Restarting $wan6_iface before JP IPoE startup."
 	ifdown "$wan6_iface" 2>/dev/null || true
 	wait_for_interface_down "$wan6_iface" || true
-	ifup "$wan6_iface" 2>/dev/null || true
+	ifup "$wan6_iface" 2>/dev/null
 }
 
 validate_map_protocol() {
@@ -649,39 +651,39 @@ configure_dhcpv6_relay() {
 
 	# Ensure dhcp.wan6 exists
 	if ! uci -q get dhcp."$wan6_iface" >/dev/null 2>&1; then
-		uci set dhcp."$wan6_iface"=dhcp
-		uci set dhcp."$wan6_iface".interface="$wan6_iface"
+		uci set dhcp."$wan6_iface"=dhcp || return 1
+		uci set dhcp."$wan6_iface".interface="$wan6_iface" || return 1
 	fi
 
 	if [ "$enabled" = "1" ]; then
-		uci set dhcp."$wan6_iface".master="1"
-		uci set dhcp."$wan6_iface".ra="relay"
-		uci set dhcp."$wan6_iface".dhcpv6="relay"
-		uci set dhcp."$wan6_iface".ndp="relay"
-		uci set dhcp."$wan6_iface".ndproxy_routing="1"
+		uci set dhcp."$wan6_iface".master="1" || return 1
+		uci set dhcp."$wan6_iface".ra="relay" || return 1
+		uci set dhcp."$wan6_iface".dhcpv6="relay" || return 1
+		uci set dhcp."$wan6_iface".ndp="relay" || return 1
+		uci set dhcp."$wan6_iface".ndproxy_routing="1" || return 1
 	else
-		uci delete dhcp."$wan6_iface".master 2>/dev/null
-		uci set dhcp."$wan6_iface".ra="disabled"
-		uci set dhcp."$wan6_iface".dhcpv6="disabled"
-		uci set dhcp."$wan6_iface".ndp="disabled"
-		uci delete dhcp."$wan6_iface".ndproxy_routing 2>/dev/null
+		jp_ipoe_uci_set_or_delete_option dhcp "$wan6_iface" master "" || return 1
+		uci set dhcp."$wan6_iface".ra="disabled" || return 1
+		uci set dhcp."$wan6_iface".dhcpv6="disabled" || return 1
+		uci set dhcp."$wan6_iface".ndp="disabled" || return 1
+		jp_ipoe_uci_set_or_delete_option dhcp "$wan6_iface" ndproxy_routing "" || return 1
 	fi
 
 	if uci -q get dhcp.lan >/dev/null 2>&1; then
 		if [ "$enabled" = "1" ]; then
-			uci delete dhcp.lan.master 2>/dev/null
-			uci set dhcp.lan.ra="relay"
-			uci set dhcp.lan.dhcpv6="relay"
-			uci set dhcp.lan.ndp="relay"
+			jp_ipoe_uci_set_or_delete_option dhcp lan master "" || return 1
+			uci set dhcp.lan.ra="relay" || return 1
+			uci set dhcp.lan.dhcpv6="relay" || return 1
+			uci set dhcp.lan.ndp="relay" || return 1
 		else
-			uci set dhcp.lan.ra="server"
-			uci set dhcp.lan.dhcpv6="server"
-			uci delete dhcp.lan.ndp 2>/dev/null
+			uci set dhcp.lan.ra="server" || return 1
+			uci set dhcp.lan.dhcpv6="server" || return 1
+			jp_ipoe_uci_set_or_delete_option dhcp lan ndp "" || return 1
 		fi
 	fi
 
-	uci commit dhcp
-	/etc/init.d/odhcpd restart 2>/dev/null || true
+	uci commit dhcp || return 1
+	/etc/init.d/odhcpd restart 2>/dev/null || return 1
 	[ "$enabled" = "1" ] && log "DHCPv6 Relay configured successfully."
 	return 0
 }
@@ -697,7 +699,7 @@ recover_wan6_after_pppoe_conflict() {
 	}
 
 	log "WAN6 did not get IPv6. Resetting managed IPoE state before PPPoE fallback stop."
-	teardown_managed_ipoe
+	teardown_managed_ipoe || return 1
 
 	stop_pppoe_fallback_interfaces "$pppoe_sections" || return 1
 
@@ -709,7 +711,7 @@ recover_wan6_after_pppoe_conflict() {
 	local attempt=1
 	while [ "$attempt" -le "$WAN6_RECOVERY_ATTEMPTS" ]; do
 		log "WAN6 recovery attempt $attempt/$WAN6_RECOVERY_ATTEMPTS: restarting $wan6_iface after PPPoE fallback stopped."
-		restart_wan6_interface "$wan6_iface" || true
+		restart_wan6_interface "$wan6_iface" || return 1
 
 		if wait_for_ipv6 "$wan6_iface" "$WAN6_RECOVERY_WAIT_TIMEOUT" >/dev/null; then
 			log "WAN6 recovered after stopping PPPoE fallback (attempt $attempt)."
@@ -735,9 +737,9 @@ remove_firewall_network() {
 	wan_zone="$(find_firewall_zone "" "$mape_iface")"; rc=$?
 	[ "$rc" -ne 1 ] || return 0
 	[ "$rc" -eq 0 ] || return 1
-	uci del_list firewall."$wan_zone".network="$mape_iface" 2>/dev/null || true
-	uci commit firewall
-	fw4 reload 2>/dev/null || true
+	uci del_list firewall."$wan_zone".network="$mape_iface" || return 1
+	uci commit firewall || return 1
+	fw4 reload 2>/dev/null || return 1
 	log "Removed $mape_iface from WAN firewall zone."
 }
 
@@ -749,9 +751,11 @@ remove_mape_config() {
 	proto="$(uci -q get network."$mape_iface".proto 2>/dev/null)"
 	tunlink="$(uci -q get network."$mape_iface".tunlink 2>/dev/null)"
 
-	if [ "$proto" = "map" ] && { [ -z "$tunlink" ] || [ "$tunlink" = "$WAN6_IFACE" ]; }; then
-		uci delete network."$mape_iface" 2>/dev/null || true
-		uci commit network
+	if [ "$JP_IPOE_CREATED_MAPE" = "$mape_iface" ] ||
+		{ [ "$proto" = "map" ] && [ "$tunlink" = "$WAN6_IFACE" ]; }; then
+		uci delete network."$mape_iface" || return 1
+		uci commit network || return 1
+		JP_IPOE_CREATED_MAPE=""
 		log "Removed MAP-E interface $mape_iface."
 	else
 		log "Leaving network.$mape_iface unchanged; it does not look like the managed MAP-E interface."
@@ -770,8 +774,8 @@ remove_managed_wan6_state() {
 	[ -n "$WAN6_IFACE" ] || return 0
 
 	if uci -q get network."$WAN6_IFACE".ip6prefix >/dev/null 2>&1; then
-		uci delete network."$WAN6_IFACE".ip6prefix 2>/dev/null || true
-		uci commit network
+		uci delete network."$WAN6_IFACE".ip6prefix || return 1
+		uci commit network || return 1
 		log "Cleared managed ip6prefix on $WAN6_IFACE."
 	fi
 }
@@ -784,7 +788,10 @@ teardown_managed_ipoe() {
 
 rollback_failed_start() {
 	log_err "Start failed, removing managed MAP-E configuration."
-	teardown_managed_ipoe
+	teardown_managed_ipoe || {
+		log_err "Managed cleanup failed; partial configuration may remain. Check network and firewall state before retrying."
+		return 1
+	}
 }
 
 fail_start() {
@@ -847,7 +854,7 @@ apply_network_config() {
 	ensure_wan_device_ipv6 "$WAN_DEVICE" || return 1
 	setup_wan6 "$WAN_DEVICE" "$WAN6_IFACE" || return 1
 
-	ifup "$WAN6_IFACE" 2>/dev/null || true
+	ifup "$WAN6_IFACE" 2>/dev/null || return 1
 
 	wait_for_ipv6 "$WAN6_IFACE" "$WAN6_INITIAL_WAIT_TIMEOUT" >/dev/null || {
 		recover_wan6_after_pppoe_conflict "$WAN6_IFACE" || return 1
@@ -918,10 +925,10 @@ apply_dhcp_config() {
 
 bringup_mape() {
 	log "Bringing up MAP-E interface..."
-	ifup "$MAPE_IFACE" 2>/dev/null || true
+	ifup "$MAPE_IFACE" 2>/dev/null || return 1
 
 	log "Reloading firewall..."
-	fw4 reload 2>/dev/null || true
+	fw4 reload 2>/dev/null
 }
 
 cmd_status() {
@@ -968,7 +975,10 @@ run_start_pipeline() {
 		return 1
 	}
 
-	bringup_mape
+	bringup_mape || {
+		fail_start "MAP-E bringup or firewall reload failed."
+		return 1
+	}
 }
 
 # Compare owned UCI options, treating an absent optional value as empty.
@@ -1102,6 +1112,7 @@ EOF
 
 # Main start command; repair bypasses only the read-only shortcut.
 cmd_start() {
+	JP_IPOE_CREATED_MAPE=""
 	jp_ipoe_config_load
 
 	if [ "$1" != force ] && configuration_is_current >/dev/null 2>&1; then
@@ -1149,12 +1160,12 @@ cmd_boot() {
 
 	pppoe_sections="$(find_wan_pppoe_sections)" || return 1
 	if [ -n "$pppoe_sections" ]; then
-		stop_pppoe_fallback_interfaces "$pppoe_sections" || true
+		stop_pppoe_fallback_interfaces "$pppoe_sections" || return 1
 	else
 		log "No WAN PPPoE fallback interface found before WAN6 restart."
 	fi
 
-	restart_wan6_interface "$WAN6_IFACE" || true
+	restart_wan6_interface "$WAN6_IFACE" || return 1
 
 	cmd_start force
 }
