@@ -284,7 +284,8 @@ printf '%s\\n' "$JP_FORWARD_BUSY" | grep -q '24082' && fail inbound-not-outbound
 conntrack() { return 1; }
 jp_forward_busy 203.0.113.1 && fail unavailable
 pidof() { return 0; }
-conntrack() { fail should-not-run; }
+# Keep inspection healthy so a missing UPnP guard cannot pass via another failure.
+conntrack() { return 0; }
 jp_forward_busy 203.0.113.1 && fail upnp
 exit 0
 `);
