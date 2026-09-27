@@ -100,17 +100,21 @@ check session permissions. The wrapper must retain executable Git mode because
 on the target firmware; mocked JS and ACL shape checks do not prove either.
 
 Normal `start` first calls the read-only `configuration_is_current` check. It
-compares owned UCI settings and observable runtime: WAN6 device/DUID/prefix,
-fresh versus active MAP bounds, firewall membership, PPPoE metrics, DHCP
-relay/service state, tunnel address/MTU/default route, the live SNAT pool and
-managed netifd redirects. It does not rely on a saved success fingerprint.
+compares the settings setup owns: WAN6 device/DUID/prefix, MAP options, firewall
+membership, PPPoE metrics and DHCP relay mode, plus that both interfaces and
+odhcpd are up, the running MAP rule matches a fresh `mapcalc` for the current
+prefix, and the `jpipoe_<iface>` SNAT table exists. It does not rely on a saved
+success fingerprint, and it does not audit runtime details (SNAT rule contents,
+routes, forwarding redirects): that drift is what Repair is for.
 
 If all checks match, only plugin settings are committed and stdout is
 `JP_IPOE_UNCHANGED=1`. Network/firewall/DHCP configuration is not rewritten and
-those services are not reloaded. Missing, opaque or unsupported state takes
-the full setup path instead. Keep this checker in sync with changes to owned
-configuration and generated SNAT rules. Local readiness does not establish
-Internet reachability or audit arbitrary custom nft rules.
+those services are not reloaded. Anything unknown takes the full setup path.
+Keep the checker in sync with options the setup helpers write.
+
+The init script deliberately has no config reload trigger: rpcd's `uci commit`
+(used by LuCI Apply) emits `config.change`, and a trigger-driven restart would
+tear MAP-E down behind the explicit Apply run.
 
 The full pipeline validates configuration and the installed MAP handler,
 configures WAN6 and its DUID, waits for IPv6, resolves automatic parameters if
@@ -199,9 +203,8 @@ does not guarantee immediate recovery, zero packet loss, or endpoint-independent
 mappings across separate destinations.
 
 The helper recreates `inet jpipoe_<cfg>` in one nft transaction, preserving
-existing conntrack mappings and removing obsolete pool chains. `check_rules()`
-checks the generated chain/rule graph, including singleton ranges; changes to
-generation must update the checker. Teardown removes the per-interface table.
+existing conntrack mappings and removing obsolete pool chains. Teardown removes
+the per-interface table.
 
 ### IPv4 forwarding
 

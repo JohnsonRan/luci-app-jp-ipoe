@@ -14,7 +14,7 @@ replace_map() (
 )
 
 case "${1:-install}" in
-restore|uninstall|remove)
+restore)
 	# Do not touch a foreign handler or its backup. Missing target is already safe.
 	[ -f "$TARGET" ] || exit 0
 	grep -q "JP_IPOE_PATCH_VERSION=" "$TARGET" 2>/dev/null || exit 0

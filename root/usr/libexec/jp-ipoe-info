@@ -5,24 +5,6 @@
 . /usr/share/libubox/jshn.sh
 . /usr/share/jp-ipoe/config.sh
 
-PPPOE_SECTION_MATCHES=""
-
-pppoe_section_collect_cb() {
-	local section="$1"
-	local proto
-
-	config_get proto "$section" proto ""
-	[ "$proto" = "pppoe" ] || return 0
-	append PPPOE_SECTION_MATCHES "$section"
-}
-
-find_pppoe_sections() {
-	config_load network
-	PPPOE_SECTION_MATCHES=""
-	config_foreach pppoe_section_collect_cb interface
-	printf '%s' "$PPPOE_SECTION_MATCHES"
-}
-
 # System-wide, cumulative counters, not MAP-E allocation or loss statistics.
 # Empty strings mean unavailable; a failed/partial dump must never become zero.
 jp_ipoe_info_conntrack() {
@@ -170,18 +152,6 @@ jp_ipoe_info_detect_br() {
 	json_dump
 }
 
-jp_ipoe_info_lookup_br() {
-	local wan6_iface="$1"
-	local legacymap="$2"
-	local rule_data
-
-	rule_data="$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)"
-	[ $? -eq 0 ] || return 1
-	[ -n "$rule_data" ] || return 1
-
-	jp_ipoe_mapcalc_lookup "$rule_data" BR
-}
-
 JP_IPOE_RULES="${JP_IPOE_RULES:-/usr/share/jp-ipoe/mape-rules}"
 
 # Resolve Japan MAP-E (OCN Virtual Connect / JPNE v6plus) rule parameters
@@ -280,9 +250,6 @@ case "$1" in
 		;;
 	detect_br)
 		jp_ipoe_info_detect_br "$2" "$3"
-		;;
-	lookup_br)
-		jp_ipoe_info_lookup_br "$2" "$3"
 		;;
 	resolve)
 		jp_ipoe_info_resolve "$2"

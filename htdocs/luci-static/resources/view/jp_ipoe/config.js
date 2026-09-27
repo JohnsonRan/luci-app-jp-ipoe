@@ -93,7 +93,7 @@ return view.extend({
 			if (res.code === 0) {
 				var unchanged = args[0] === 'start' && (res.stdout || '').trim() === 'JP_IPOE_UNCHANGED=1';
 				ui.addTimeLimitedNotification(null, E('p', unchanged
-					? _('IPoE is already configured. No restart needed.') : okMessage), 5000, 'info');
+					? _('Settings unchanged and the tunnel is up; nothing was restarted. If traffic still fails, use Force Reconnect / Repair.') : okMessage), unchanged ? 10000 : 5000, 'info');
 			} else
 				ui.addNotification(null, E('pre', {},
 					(failMessage ? failMessage + '\n' : '') + self.formatCommandOutput(res)), 'error');
@@ -102,34 +102,24 @@ return view.extend({
 		});
 	},
 
-	// Count the assigned ranges from mapcalc, not unreserved or idle ports.
-	portRangeSummary: function(text) {
-		if (text == null || text === '-' || text === _('Unavailable'))
-			return _('Unavailable');
-		if (typeof text !== 'string')
-			return _('Unknown');
-		text = text.trim().replace(/^(['"])([\s\S]*)\1$/, '$2').trim();
-		if (!text)
-			return _('Unavailable');
-
-		var ranges = text.split(/[\s,]+/).map(function(token) {
-			var match = token.match(/^(\d+)(?:-(\d+))?$/);
-			if (!match)
+	// mapcalc PORTSETS ("lo-hi ...") -> { ranges, ports }, or null if malformed.
+	parsePortRanges: function(text) {
+		var tokens = String(text).trim().split(/\s+/).filter(Boolean), ports = 0;
+		for (var i = 0; i < tokens.length; i++) {
+			var m = tokens[i].match(/^(\d+)(?:-(\d+))?$/);
+			var first = m && Number(m[1]), last = m && Number(m[2] || m[1]);
+			if (!m || first < 1 || last > 65535 || first > last)
 				return null;
-			var first = Number(match[1]), last = Number(match[2] || match[1]);
-			return first >= 1 && last <= 65535 && first <= last ? [first, last] : null;
-		});
-		if (ranges.some(function(range) { return !range; }))
-			return _('Unknown');
-		ranges.sort(function(a, b) { return a[0] - b[0]; });
-		var total = 0;
-		for (var i = 0; i < ranges.length; i++) {
-			// Do not silently double-count malformed overlapping ranges.
-			if (i && ranges[i][0] <= ranges[i - 1][1])
-				return _('Unknown');
-			total += ranges[i][1] - ranges[i][0] + 1;
+			ports += last - first + 1;
 		}
-		return _('Ranges: %d · Assigned ports: %d').replace('%d', ranges.length).replace('%d', total);
+		return { ranges: tokens.length, ports: ports };
+	},
+
+	portRangeSummary: function(text) {
+		if (text == null || text === '-' || text === _('Unavailable') || !String(text).trim())
+			return _('Unavailable');
+		var r = this.parsePortRanges(text);
+		return r ? _('Ranges: %d · Assigned ports: %d').replace('%d', r.ranges).replace('%d', r.ports) : _('Unknown');
 	},
 
 	// Single source for the status table: renderStatusPanel builds the rows
@@ -525,10 +515,7 @@ return view.extend({
 				throw new Error(self.formatCommandOutput(res));
 			var data = JSON.parse(res.stdout);
 			var ranges = (data.portsets || '').trim().split(/\s+/).filter(Boolean);
-			var ports = ranges.reduce(function(total, range) {
-				var bounds = range.split('-');
-				return total + Number(bounds[1] || bounds[0]) - Number(bounds[0]) + 1;
-			}, 0);
+			var ports = (self.parsePortRanges(ranges.join(' ')) || { ports: 0 }).ports;
 			document.getElementById('jp-forward-public').textContent = data.public_ip || '—';
 			document.getElementById('jp-forward-allocation').textContent = data.up
 				? _('MAP-E connected') + ' · ' + _('Assigned ports') + ': ' + ports + ' · ' + _('Port ranges') + ': ' + ranges.length
@@ -747,17 +734,14 @@ return view.extend({
 		return this.execSetup(['detect_br']).then(function(res) {
 			var errMsg = _('Detection failed');
 
-			if (res.code === 0 && res.stdout) {
-				try {
-					var data = JSON.parse(res.stdout);
-					if (!data.error && data.br_addr)
-						return self.promptSaveBR(data.br_addr);
-					if (data.error)
-						errMsg += ': ' + data.error;
-				} catch (e) {
-					errMsg = _('Failed to parse detection result');
-				}
-			}
+			// The helper prints {"error": ...} with a non-zero exit code.
+			try {
+				var data = JSON.parse(res.stdout);
+				if (res.code === 0 && data.br_addr)
+					return self.promptSaveBR(data.br_addr);
+				if (data.error)
+					errMsg += ': ' + data.error;
+			} catch (e) {}
 
 			ui.addNotification(null, E('p', errMsg), 'error');
 		}).catch(function(e) {

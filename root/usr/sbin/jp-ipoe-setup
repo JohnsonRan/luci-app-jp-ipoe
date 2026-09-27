@@ -40,7 +40,6 @@ log_err() {
 }
 
 FIREWALL_ZONE_MATCH=""
-PPPOE_SECTION_MATCHES=""
 NETWORK_DEVICE_MATCH=""
 JP_IPOE_STOPPED_PPPOE=""
 JP_IPOE_CREATED_MAPE=""
@@ -114,22 +113,6 @@ get_firewall_zone_networks() {
 	config_load firewall
 	config_get networks "$zone" network ""
 	printf '%s' "$networks"
-}
-
-pppoe_section_collect_cb() {
-	local section="$1"
-	local proto
-
-	config_get proto "$section" proto ""
-	[ "$proto" = "pppoe" ] || return 0
-	append PPPOE_SECTION_MATCHES "$section"
-}
-
-find_pppoe_sections() {
-	config_load network
-	PPPOE_SECTION_MATCHES=""
-	config_foreach pppoe_section_collect_cb interface
-	printf '%s' "$PPPOE_SECTION_MATCHES"
 }
 
 find_wan_pppoe_sections() {
@@ -216,8 +199,6 @@ wait_for_interface_down() {
 	local iface="$1"
 	local timeout="${2:-$IFACE_DOWN_WAIT_TIMEOUT}"
 	local elapsed=0
-
-	[ -n "$iface" ] || return 0
 
 	while [ $elapsed -lt $timeout ]; do
 		network_flush_cache
@@ -396,7 +377,6 @@ ensure_wan6_ip6prefix() {
 	fi
 
 	ip6prefix=$(get_ipv6_prefix "$wan6_iface" "$wan6_dev") || return 1
-	[ -n "$ip6prefix" ] || return 1
 
 	current_prefix=$(uci -q get network."$wan6_iface".ip6prefix 2>/dev/null)
 	if [ "$current_prefix" = "$ip6prefix" ]; then
@@ -540,7 +520,6 @@ setup_firewall() {
 			log "$iface already in WAN firewall zone"
 		else
 			uci add_list firewall."$wan_zone".network="$iface" || return 1
-			append networks "$iface"
 			log "Added $iface to WAN firewall zone"
 		fi
 	done
@@ -566,11 +545,6 @@ setup_pppoe_fallback_metrics() {
 stop_pppoe_fallback_interfaces() {
 	local pppoe_sections="$1"
 	local section
-
-	[ -n "$pppoe_sections" ] || {
-		log_err "No PPPoE fallback interface stopped."
-		return 1
-	}
 
 	setup_pppoe_fallback_metrics || return 1
 
@@ -618,47 +592,20 @@ restore_stopped_pppoe_fallback() {
 restart_wan6_interface() {
 	local wan6_iface="$1"
 
-	[ -n "$wan6_iface" ] || {
-		log_err "WAN6 interface name is not configured."
-		return 1
-	}
-
 	log "Restarting $wan6_iface before JP IPoE startup."
 	ifdown "$wan6_iface" 2>/dev/null || true
 	wait_for_interface_down "$wan6_iface" || true
 	ifup "$wan6_iface" 2>/dev/null
 }
 
-validate_map_protocol() {
-	local our_map="/lib/netifd/proto/map.sh"
-	local helper="/usr/libexec/jp-ipoe-map-nft"
-	local info_helper="/usr/libexec/jp-ipoe-info"
-	local installer="/usr/libexec/jp-ipoe-install-map"
-
-	if [ ! -f "$helper" ]; then
-		log_err "Required MAP-E nft helper not found at $helper"
+# Install the bundled handler when the live one is missing or differs.
+apply_map_protocol() {
+	cmp -s /lib/netifd/proto/map.sh /usr/share/jp-ipoe/map.sh && return 0
+	log "Patched MAP-E protocol script is missing or outdated; installing it now."
+	sh /usr/libexec/jp-ipoe-install-map || {
+		log_err "Failed to install patched MAP-E protocol script."
 		return 1
-	fi
-
-	if [ ! -f "$info_helper" ]; then
-		log_err "Required info helper not found at $info_helper"
-		return 1
-	fi
-
-	if ! grep -q "JP_IPOE_PATCH_VERSION=" "$our_map" 2>/dev/null ||
-		! cmp -s "$our_map" /usr/share/jp-ipoe/map.sh; then
-		log "Patched MAP-E protocol script is missing or differs from the bundled version; installing it now."
-		if [ ! -f "$installer" ]; then
-			log_err "MAP-E protocol installer not found at $installer"
-			return 1
-		fi
-		sh "$installer" || {
-			log_err "Failed to install patched MAP-E protocol script."
-			return 1
-		}
-	fi
-
-	log "Patched MAP-E protocol script is installed."
+	}
 }
 
 # Configure DHCPv6 / Router Advertisement Relay
@@ -865,10 +812,6 @@ validate_config() {
 	resolve_ipoe_firewall_zone "$WAN6_IFACE" "$MAPE_IFACE" >/dev/null
 }
 
-apply_map_protocol() {
-	validate_map_protocol
-}
-
 apply_network_config() {
 	local wan6_dev
 
@@ -937,11 +880,7 @@ apply_firewall_config() {
 }
 
 apply_dhcp_config() {
-	if [ "$DHCPV6_RELAY" = "1" ]; then
-		configure_dhcpv6_relay "$WAN6_IFACE" 1
-	else
-		configure_dhcpv6_relay "$WAN6_IFACE" 0
-	fi
+	configure_dhcpv6_relay "$WAN6_IFACE" "$DHCPV6_RELAY"
 }
 
 bringup_mape() {
@@ -976,10 +915,7 @@ run_start_pipeline() {
 		return 1
 	}
 
-	apply_map_protocol || {
-		log_err "MAP-E protocol validation failed."
-		return 1
-	}
+	apply_map_protocol || return 1
 
 	apply_network_config || {
 		fail_start "Network interface setup failed."
@@ -1010,9 +946,13 @@ option_matches() {
 	[ "$actual" = "$2" ]
 }
 
+# Deliberately owned state only: runtime drift (SNAT table contents, routes,
+# forwarding data) is what Repair is for.
 configuration_is_current() (
 	local package changes section key value wan6_dev ipv6 prefix="" mac duid
-	local wan_zone networks peer legacy="" rule saved fresh suffix ip4 ports link mtu status expected
+	local wan_zone networks peer legacy="" rule saved fresh suffix
+	# A probe that falls back to the full pipeline is not an error.
+	log() { :; }; log_err() { :; }
 	validate_config || return 1
 	cmp -s /lib/netifd/proto/map.sh /usr/share/jp-ipoe/map.sh || return 1
 	# Pending external edits do not prove the running services received them.
@@ -1101,34 +1041,8 @@ EOF
 		value="$(jp_ipoe_mapcalc_lookup "$fresh" "$suffix")"
 		[ -n "$value" ] && [ "$(jp_ipoe_mapcalc_lookup "$saved" "$suffix")" = "$value" ] || return 1
 	done
-	ip4="$(jp_ipoe_mapcalc_lookup "$fresh" IPV4ADDR)"
-	ports="$(jp_ipoe_mapcalc_lookup "$fresh" PORTSETS)"
-	network_get_device link "$MAPE_IFACE" && [ "$link" = "map-$MAPE_IFACE" ] || return 1
-	network_get_ipaddr value "$MAPE_IFACE" && [ "$value" = "$ip4" ] || return 1
-	read -r mtu < "/sys/class/net/$link/mtu" || return 1
-	[ "$mtu" = "$MAPE_MTU" ] || return 1
-	ip -4 addr show dev "$link" | grep -Fq "inet $ip4/" || return 1
-	[ -n "$(ip -4 route show default dev "$link")" ] || return 1
-	nft list table inet fw4 >/dev/null || return 1
-	sh /usr/libexec/jp-ipoe-map-nft check "$MAPE_IFACE" "$link" "$ip4" "$ports" || return 1
-
-	. /usr/share/libubox/jshn.sh
-	. /usr/share/jp-ipoe/forward.sh
-	status="$(ubus call "network.interface.$MAPE_IFACE" status)" || return 1
-	expected="$(jp_forward_render "$MAPE_IFACE" "$ip4" "$ports")" || return 1
-	ucode -e '
-		function canonical(v) {
-			if (type(v) == "array") return map(v, canonical);
-			if (type(v) != "object") return v;
-			let out = {}; for (let key in sort(keys(v))) out[key] = canonical(v[key]); return out;
-		}
-		let state = json(ARGV[0]), expected = json(ARGV[1]);
-		if (!state.up || type(state.data?.firewall) != "array") exit(1);
-		let actual = filter(state.data.firewall, r => type(r.name) == "string" && index(r.name, "jp_ipoe_") == 0);
-		sort(actual, (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-		sort(expected.firewall, (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-		exit(sprintf("%J", canonical(actual)) == sprintf("%J", canonical(expected.firewall)) ? 0 : 1);
-	' "$status" "$expected"
+	# Presence of the dedicated SNAT table only, not a rule-by-rule audit.
+	nft list table inet "jpipoe_$MAPE_IFACE" >/dev/null 2>&1
 )
 
 # Main start command; repair bypasses only the read-only shortcut.
@@ -1162,7 +1076,7 @@ cmd_stop() {
 		find_firewall_zone "" "$iface" >/dev/null; rc=$?
 		[ "$rc" -ne 2 ] || return 1
 	done
-	validate_interface_roles stop || return 1
+	validate_interface_roles || return 1
 	log "Stopping JP IPoE interfaces..."
 	teardown_managed_ipoe || return 1
 	log "Done."
@@ -1217,8 +1131,6 @@ run_locked() {
 	local rc
 	local holder=""
 	local elapsed=0
-
-	mkdir -p "$(dirname "$LOCK_DIR")" 2>/dev/null || true
 
 	while ! mkdir "$LOCK_DIR" 2>/dev/null; do
 		holder="$(cat "$LOCK_DIR/pid" 2>/dev/null)"

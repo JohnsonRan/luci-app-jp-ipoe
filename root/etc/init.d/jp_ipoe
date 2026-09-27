@@ -28,12 +28,5 @@ stop_service() {
 	/usr/sbin/jp-ipoe-setup stop
 }
 
-reload_service() {
-	# rc.common's default restart is stop + start, which re-runs the
-	# enabled gate in start_service — no separate gate needed here.
-	restart
-}
-
-service_triggers() {
-	procd_add_reload_trigger "jp_ipoe"
-}
+# No config reload trigger: rpcd's uci commit (LuCI Apply) emits config.change,
+# and a restart here would tear down MAP-E behind the explicit Apply run.

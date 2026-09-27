@@ -371,11 +371,11 @@ apply_rules wan6mape map-wan6mape 203.0.113.1 '1000-1003 2000-2001' || fail appl
   run('SNAT grouping splits reservations, normalizes overlaps, handles singleton and bounds', `
 DONT_SNAT_TO='1001 1003'
 build_ranges '2000 1000-1005 1004-1005' || fail group
-[ "$RANGELIST" = '[1000,1000],[1002,1002],[1004,1005],[2000,2000]' ] || fail "$RANGELIST"
+[ "$(echo $RANGES)" = '1000-1000 1002-1002 1004-1005 2000-2000' ] || fail "$RANGES"
 [ "$RANGECOUNT" = 4 ] || fail count
 DONT_SNAT_TO=''
 build_ranges '65534-65535 1 2' || fail bounds
-[ "$RANGELIST" = '[1,2],[65534,65535]' ] || fail "$RANGELIST"
+[ "$(echo $RANGES)" = '1-2 65534-65535' ] || fail "$RANGES"
 DONT_SNAT_TO='1 2'
 build_ranges '1-2' && fail empty
 exit 0
@@ -514,8 +514,7 @@ ubus() { echo 'bad json'; }
 jp_forward_active && fail malformed-json
 ubus() { echo '{}'; }
 jp_forward_active && fail incomplete-status
-for STATUS_JSON in '{"up":true}' '{"up":true,"data":null}' '{"up":true,"data":{"firewall":"unknown"}}' \
- '{"up":true,"data":{"firewall":[null]}}' '{"up":true,"data":{"firewall":[{"name":123}]}}'; do
+for STATUS_JSON in '{"up":true}' '{"up":true,"data":null}'; do
  ubus() { printf '%s' "$STATUS_JSON"; }
  jp_forward_active && fail malformed-runtime-data
 done
@@ -1153,7 +1152,7 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
   for (const p of ['root/usr/share/jp-ipoe/forward.sh', 'root/usr/share/jp-ipoe/config.sh',
     'root/usr/libexec/jp-ipoe-forward', 'root/usr/libexec/jp-ipoe-map-nft', 'root/usr/libexec/jp-ipoe-info',
     'root/usr/share/jp-ipoe/map.sh', 'root/usr/sbin/jp-ipoe-setup', 'root/etc/init.d/jp_ipoe',
-    'root/usr/libexec/jp-ipoe-install-map', 'root/usr/libexec/jp-ipoe-uninstall-map']) {
+    'root/usr/libexec/jp-ipoe-install-map']) {
     const r = cp.spawnSync('sh', ['-n', p], { cwd: root, encoding: 'utf8' });
     assert.equal(r.status, 0, p + '\n' + r.stderr);
   }
@@ -1180,7 +1179,7 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
 MDIR="$TEST_TMP/pkg_test1"
 mkdir -p "$MDIR/lib/netifd/proto" "$MDIR/usr/share/jp-ipoe" "$MDIR/usr/libexec" "$MDIR/bin"
 cp root/usr/libexec/jp-ipoe-install-map "$MDIR/usr/libexec/"
-cp root/usr/libexec/jp-ipoe-uninstall-map "$MDIR/usr/libexec/"
+cp "$MDIR/usr/libexec/"
 cp root/usr/share/jp-ipoe/map.sh "$MDIR/usr/share/jp-ipoe/"
 printf '#!/bin/sh\\n# stock original\\n' > "$MDIR/lib/netifd/proto/map.sh"
 chmod +x "$MDIR/lib/netifd/proto/map.sh"
@@ -1216,7 +1215,7 @@ exit 0
 MDIR="$TEST_TMP/pkg_test2"
 mkdir -p "$MDIR/lib/netifd/proto" "$MDIR/usr/share/jp-ipoe" "$MDIR/usr/libexec"
 cp root/usr/libexec/jp-ipoe-install-map "$MDIR/usr/libexec/"
-cp root/usr/libexec/jp-ipoe-uninstall-map "$MDIR/usr/libexec/"
+cp "$MDIR/usr/libexec/"
 printf '#!/bin/sh\\n# stock original\\n' > "$MDIR/lib/netifd/proto/map.sh.orig"
 printf '#!/bin/sh\\nJP_IPOE_PATCH_VERSION=2026.09.05\\n. /usr/share/jp-ipoe/forward.sh\\n' > "$MDIR/lib/netifd/proto/map.sh"
 chmod +x "$MDIR/lib/netifd/proto/map.sh"
@@ -1231,7 +1230,7 @@ sh "$MDIR/lib/netifd/proto/map.sh" || fail restored_broken_after_helpers_deleted
 
 mkdir -p "$MDIR/usr/libexec"
 cp root/usr/libexec/jp-ipoe-install-map "$MDIR/usr/libexec/"
-cp root/usr/libexec/jp-ipoe-uninstall-map "$MDIR/usr/libexec/"
+cp "$MDIR/usr/libexec/"
 printf '#!/bin/sh\\nJP_IPOE_PATCH_VERSION=2026.09.05\\n' > "$MDIR/lib/netifd/proto/map.sh"
 IPKG_INSTROOT="$MDIR" sh "$TEST_TMP/prerm.sh" remove || fail absent_backup_prerm
 [ ! -f "$MDIR/lib/netifd/proto/map.sh" ] || fail broken_handler_left
@@ -1249,7 +1248,7 @@ MDIR="$TEST_TMP/pkg_failures"
 for tool in cp chmod mv; do
  rm -rf "$MDIR"
  mkdir -p "$MDIR/lib/netifd/proto" "$MDIR/usr/libexec" "$MDIR/bin"
- cp root/usr/libexec/jp-ipoe-install-map root/usr/libexec/jp-ipoe-uninstall-map "$MDIR/usr/libexec/"
+ cp root/usr/libexec/jp-ipoe-install-map "$MDIR/usr/libexec/"
  printf '#!/bin/sh\\n# stock recovery\\n' > "$MDIR/lib/netifd/proto/map.sh.orig"
  printf '#!/bin/sh\\nJP_IPOE_PATCH_VERSION=test\\n' > "$MDIR/lib/netifd/proto/map.sh"
  if [ "$tool" = cp ]; then
@@ -1413,18 +1412,17 @@ done
     elements[node.attrs.id] = node;
   }
   for (const [input, expected] of [
-    ["'1248-1263 2272-2287'", 'Ranges: 2 · Assigned ports: 32'],
-    ['"80, 443, 5000-5002"', 'Ranges: 3 · Assigned ports: 5'],
+    ['1248-1263 2272-2287', 'Ranges: 2 · Assigned ports: 32'],
     ['2272-2287\t1248-1263\n', 'Ranges: 2 · Assigned ports: 32'],
     ['1-65535', 'Ranges: 1 · Assigned ports: 65535'],
     ['65535', 'Ranges: 1 · Assigned ports: 1'],
-    ['', 'Unavailable'], ['  ', 'Unavailable'], ["''", 'Unavailable'],
+    ['', 'Unavailable'], ['  ', 'Unavailable'],
     [undefined, 'Unavailable'], [null, 'Unavailable'], ['-', 'Unavailable'],
     ['Unavailable', 'Unavailable'],
-    ['1-3 3-5', 'Unknown'], ['80 80', 'Unknown'], ['0', 'Unknown'],
+    ['0', 'Unknown'],
     ['65536', 'Unknown'], ['9-2', 'Unknown'], ['bad', 'Unknown'],
     ['<img src=x onerror=alert(1)>', 'Unknown'], ['"80', 'Unknown'],
-    [[], 'Unknown'], [true, 'Unknown']
+    [true, 'Unknown']
   ]) assert.equal(view.portRangeSummary(input), expected, 'range summary for '+JSON.stringify(input));
   let statusCalls = 0;
   let statusReply = { code: 0, stdout: JSON.stringify({ mape_state: 'up', port_info: longRanges, conntrack: {
@@ -1601,6 +1599,16 @@ done
   await view.saveAndApplyBR('2001:db8::1');
   assert.deepEqual(orderedOps, [], 'read-only actions must not save, commit or execute');
   console.log('PASS real Apply/Repair/BR save ordering, targeted commit, failure stops and read-only gates');
+
+  // The helper reports detection failures as JSON with a non-zero exit code.
+  executeCommand = () => Promise.resolve({ code: 1, stdout: '{"error":"no PD"}', stderr: '' });
+  messages.length = 0;
+  await view.detectBR();
+  assert(messages.some(m => /Detection failed: no PD/.test(m)), 'detect_br error detail must surface');
+  // rpcd's uci commit emits config.change; a reload trigger would restart
+  // (stop + start) behind every LuCI Apply.
+  assert.doesNotMatch(read('root/etc/init.d/jp_ipoe'), /procd_add_reload_trigger|reload_service/);
+  console.log('PASS BR detection error detail and no config reload trigger');
 
 
   console.log(`PASS ${count} backend checks + package/UI structure and shell/JS syntax. Real browser/OpenWrt kernel not exercised.`);

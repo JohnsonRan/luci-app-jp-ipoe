@@ -125,10 +125,6 @@ msgstr ""
 msgid "Error:"
 msgstr ""
 
-#: htdocs/luci-static/resources/view/jp_ipoe/config.js:354
-msgid "Failed to parse detection result"
-msgstr ""
-
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:323
 msgid "Failed to parse status"
 msgstr ""
@@ -417,7 +413,7 @@ msgstr ""
 msgid "Automatic port"
 msgstr ""
 
-msgid "IPoE is already configured. No restart needed."
+msgid "Settings unchanged and the tunnel is up; nothing was restarted. If traffic still fails, use Force Reconnect / Repair."
 msgstr ""
 
 msgid "Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic."

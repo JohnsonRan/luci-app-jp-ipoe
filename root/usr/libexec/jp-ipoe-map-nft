@@ -22,7 +22,7 @@ load_reserved_ports() {
 }
 
 build_ranges() {
-	local range lo hi
+	local range
 	# Normalize the union before grouping; reservations split, never bridge, runs.
 	RANGES="$(awk -v ranges="$1" -v reserved="$DONT_SNAT_TO" '
 		BEGIN {
@@ -41,11 +41,8 @@ build_ranges() {
 			}
 		}')" || return 1
 	RANGECOUNT=0
-	RANGELIST=""
 	RANGEMAP=""
 	for range in $RANGES; do
-		lo="${range%-*}"; hi="${range#*-}"
-		append RANGELIST "[$lo,$hi]" ","
 		append RANGEMAP "$RANGECOUNT : jump pool_$RANGECOUNT" ", "
 		RANGECOUNT=$((RANGECOUNT + 1))
 	done
@@ -90,60 +87,6 @@ apply_rules() {
 	} | nft -f -
 }
 
-# Read-only local readiness check, not a saved configuration fingerprint.
-# Unknown nft JSON shapes conservatively require the normal apply path.
-check_rules() {
-	local cfg="$1" link="$2" snat_ip="$3" portsets="$4"
-	load_reserved_ports "$cfg" "$snat_ip" || return 1
-	jp_forward_select "$portsets" "$DONT_SNAT_TO" "" >/dev/null || return 1
-	build_ranges "$portsets" || return 1
-	nft -j list table inet "$(table_name "$cfg")" | ucode -e '
-		let state = json(require("fs").stdin.read("all"));
-		let ranges = json(ARGV[0]), link = ARGV[1], ip = ARGV[2];
-		let chains = map(filter(state.nftables, e => e.chain), e => e.chain);
-		let rules = map(filter(state.nftables, e => e.rule), e => e.rule);
-		function same(a, b) {
-			if (type(a) != type(b)) return false;
-			if (type(b) == "array") {
-				if (length(a) != length(b)) return false;
-				for (let i = 0; i < length(b); i++) if (!same(a[i], b[i])) return false;
-			} else if (type(b) == "object") {
-				if (length(a) != length(b)) return false;
-				for (let k in b) if (!same(a[k], b[k])) return false;
-			} else return a == b;
-			return true;
-		}
-		function payload(proto, field, value, op) {
-			return { match: { op: op || "==", left: { payload: { protocol: proto, field } }, right: value } };
-		}
-		function chain(name, expected, base) {
-			let c = filter(chains, e => e.name == name);
-			let r = filter(rules, e => e.chain == name);
-			if (length(c) != 1 || length(r) != length(expected)) exit(1);
-			if (base) {
-				if (c[0].type != "nat" || c[0].hook != "postrouting" || c[0].prio != 0 || c[0].policy != "accept") exit(1);
-			} else if (c[0].type != null || c[0].hook != null) exit(1);
-			for (let i = 0; i < length(r); i++) if (!same(r[i].expr, expected[i])) exit(1);
-		}
-		if (length(chains) != length(ranges) + 1 || length(rules) != length(ranges) * 3 + 4) exit(1);
-		let pairs = [];
-		for (let i = 0; i < length(ranges); i++) {
-			let port = ranges[i][0] == ranges[i][1] ? ranges[i][0] : { range: ranges[i] };
-			chain("pool_" + i, map(["tcp", "udp", "icmp"], proto => [
-				payload("ip", "protocol", proto), { snat: { family: "ip", addr: ip, port } }
-			]), false);
-			push(pairs, [i, { jump: { target: "pool_" + i } }]);
-		}
-		let device = { match: { op: "==", left: { meta: { key: "oifname" } }, right: link } };
-		let dispatch = { vmap: { key: { numgen: { mode: "inc", mod: length(ranges), offset: 0 } }, data: { set: pairs } } };
-		let expected = map(["tcp", "udp"], proto => [payload("ip", "protocol", proto), device, dispatch]);
-		push(expected, [payload("ip", "protocol", "icmp"), payload("icmp", "type", "echo-request"), device, dispatch]);
-		push(expected, [payload("ip", "protocol", "icmp"), payload("icmp", "type", "echo-request", "!="), device, { snat: { family: "ip", addr: ip } }]);
-		chain("srcnat", expected, true);
-		exit(0);
-	' "[$RANGELIST]" "$link" "$snat_ip"
-}
-
 teardown_rules() {
 	local cfg="$1"
 	local nft_table
@@ -155,9 +98,6 @@ teardown_rules() {
 case "$1" in
 	setup)
 		apply_rules "$2" "$3" "$4" "$5"
-		;;
-	check)
-		check_rules "$2" "$3" "$4" "$5"
 		;;
 	teardown)
 		teardown_rules "$2"

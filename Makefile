@@ -27,13 +27,9 @@ define Package/$(PKG_NAME)/prerm
 #!/bin/sh
 [ "$$PKG_UPGRADE" = "1" ] && exit 0
 [ "$$1" = "upgrade" ] && exit 0
-if [ -n "$$IPKG_INSTROOT" ]; then
-	[ -f "$$IPKG_INSTROOT/usr/libexec/jp-ipoe-uninstall-map" ] || exit 0
-	IPKG_INSTROOT="$$IPKG_INSTROOT" exec sh "$$IPKG_INSTROOT/usr/libexec/jp-ipoe-uninstall-map"
-else
-	[ -f /usr/libexec/jp-ipoe-uninstall-map ] || exit 0
-	exec sh /usr/libexec/jp-ipoe-uninstall-map
-fi
+INSTALLER="$${IPKG_INSTROOT:-}/usr/libexec/jp-ipoe-install-map"
+[ -f "$$INSTALLER" ] || exit 0
+exec sh "$$INSTALLER" restore
 endef
 
 # luci.mk registers the application and translations once, after our hooks.

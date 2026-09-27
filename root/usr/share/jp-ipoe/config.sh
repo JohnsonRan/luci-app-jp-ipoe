@@ -30,6 +30,20 @@ jp_forward_load_rule() {
 	config_get JP_F_PROTO "$1" proto ""
 }
 
+pppoe_section_collect_cb() {
+	local proto
+	config_get proto "$1" proto ""
+	[ "$proto" = "pppoe" ] && append PPPOE_SECTION_MATCHES "$1"
+	return 0
+}
+
+find_pppoe_sections() {
+	PPPOE_SECTION_MATCHES=""
+	config_load network
+	config_foreach pppoe_section_collect_cb interface
+	printf '%s' "$PPPOE_SECTION_MATCHES"
+}
+
 # Read a value from `mapcalc` rule output, preferring the matched rule
 # (RULE_BMR) and falling back to RULE_1. Shared by jp-ipoe-setup and
 # jp-ipoe-info so the lookup logic stays in one place.
