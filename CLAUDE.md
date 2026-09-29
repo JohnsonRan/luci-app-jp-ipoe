@@ -50,7 +50,7 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 
 **Patched `map.sh`**
 - Keep the `JP_IPOE_PATCH_VERSION=` marker; install/restore depend on it.
-- prerm restores the stock backup atomically or withdraws the patched handler. Never touch foreign handlers or backups.
+- Live prerm stops the service before restoring the stock backup atomically or withdrawing the patched handler. Even if stop fails, restoration must run because apk can purge helpers anyway. Image-root hooks must not stop host services. Never touch foreign handlers or backups.
 - Package upgrades (`PKG_UPGRADE=1`) must not tear down manually applied MAP-E when Enable at Boot is off. This exception belongs in the init stop hook, not `cmd_stop` or `cmd_boot`.
 
 **SNAT**

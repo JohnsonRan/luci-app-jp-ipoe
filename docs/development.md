@@ -42,8 +42,13 @@ opkg's default removal hook still calls service stop during upgrades, but
 it. Ordinary stop and boot behavior are unchanged. OpenWrt 25.12 apk uses
 separate upgrade hooks (no pre-deinstall on upgrade).
 
-`prerm` restores the saved stock handler before package helpers
-are removed, skipping opkg upgrades (apk uses separate upgrade hooks). It leaves
+On live uninstall, `prerm` explicitly stops the service before restoring the
+saved stock handler, so netifd teardown can still use the patched handler and
+SNAT helper. This precedes opkg's default service stop; on 25.12 apk the default
+stop runs first, so the explicit stop must remain idempotent. Image-root hooks
+never stop the host's service. A stop failure is reported, but handler restoration
+still runs because apk can purge helpers even after a failing hook.
+`prerm` skips opkg upgrades (apk uses separate upgrade hooks). It leaves
 foreign handlers and their backups untouched. Restoration prepares a same-directory
 temporary file before rename. If restoration fails, it preserves the backup and
 attempts to remove the owned patched handler: apk continues purging package files

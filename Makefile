@@ -29,7 +29,19 @@ define Package/$(PKG_NAME)/prerm
 [ "$$1" = "upgrade" ] && exit 0
 INSTALLER="$${IPKG_INSTROOT:-}/usr/libexec/jp-ipoe-install-map"
 [ -f "$$INSTALLER" ] || exit 0
-exec sh "$$INSTALLER" restore
+rc=0
+if [ -z "$$IPKG_INSTROOT" ]; then
+	# Teardown must still use our handler and SNAT helper. opkg runs this
+	# hook before default_prerm's service stop; apk may already have stopped it.
+	/etc/init.d/jp_ipoe stop || {
+		echo "ERROR: Failed to stop JP IPoE before uninstall; check network/firewall state." >&2
+		rc=1
+	}
+fi
+# Even after a stop failure, withdraw the helper-dependent handler: apk can
+# purge package files despite a failing pre-deinstall hook.
+sh "$$INSTALLER" restore || rc=1
+exit "$$rc"
 endef
 
 # luci.mk registers the application and translations once, after our hooks.

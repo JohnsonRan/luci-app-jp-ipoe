@@ -1336,6 +1336,41 @@ start() { start_service "$@"; }
 
   fs.writeFileSync(path.join(tmp, 'postinst.sh'), postinst, { mode: 0o755 });
   fs.writeFileSync(path.join(tmp, 'prerm.sh'), prerm, { mode: 0o755 });
+  // Redirect only absolute device paths, leaving the actual hook control flow.
+  const livePrerm = prerm
+    .replace('/etc/init.d/jp_ipoe', 'service_mock')
+    .replace('${IPKG_INSTROOT:-}/usr/libexec/jp-ipoe-install-map', tmp + '/restore-mock');
+  fs.writeFileSync(tmp + '/restore-mock', '#!/bin/sh\necho restore >> "$TEST_TMP/remove-order"\nexit "${RESTORE_RC:-0}"\n');
+  run('live prerm: stop before restore, retain restoration on failure, skip upgrades/image host stop', `
+service_mock() { echo stop >> "$TEST_TMP/remove-order"; return "$STOP_RC"; }
+for STOP_RC in 0 1; do
+ for RESTORE_RC in 0 1; do
+  export RESTORE_RC
+  : > "$TEST_TMP/remove-order"
+  ( ${livePrerm} ); rc=$?
+  expected=0; [ "$STOP_RC$RESTORE_RC" = 00 ] || expected=1
+  [ "$rc" = "$expected" ] || fail ignored-hook-failure
+  [ "$(tr '\\n' ' ' < "$TEST_TMP/remove-order")" = 'stop restore ' ] || fail teardown-order
+ done
+done
+STOP_RC=0; RESTORE_RC=0
+for mode in upgrade_env upgrade_arg image; do
+ : > "$TEST_TMP/remove-order"
+ (
+  case "$mode" in
+   upgrade_env) PKG_UPGRADE=1;;
+   upgrade_arg) set -- upgrade;;
+   image) IPKG_INSTROOT=/image-root;;
+  esac
+  ${livePrerm}
+ ) || fail "$mode"
+ if [ "$mode" = image ]; then
+  [ "$(tr '\\n' ' ' < "$TEST_TMP/remove-order")" = 'restore ' ] || fail image-stopped-host
+ else
+  [ ! -s "$TEST_TMP/remove-order" ] || fail upgrade-mutated
+ fi
+done
+`);
 
   run('package hooks: install creates backup, upgrade preserves state, failure propagates', `
 MDIR="$TEST_TMP/pkg_test1"
