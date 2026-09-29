@@ -101,57 +101,6 @@ jp_ipoe_info_status() {
 	json_dump
 }
 
-jp_ipoe_info_detect_br() {
-	local wan6_iface="$1"
-	local legacymap="$2"
-	local wan6_dev
-	local wan6_ipv6=""
-	local rule_data
-	local br
-	local ipv4
-	local portsets
-
-	network_flush_cache
-	network_get_device wan6_dev "$wan6_iface" || wan6_dev="$(uci -q get network."$wan6_iface".device 2>/dev/null)"
-	if [ -z "$wan6_dev" ]; then
-		json_init
-		json_add_string "error" "WAN6 interface not configured yet"
-		json_dump
-		return 1
-	fi
-
-	network_get_ipaddr6 wan6_ipv6 "$wan6_iface" || wan6_ipv6=""
-
-	rule_data="$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)"
-	if [ $? -ne 0 ] || [ -z "$rule_data" ]; then
-		json_init
-		if [ -n "$wan6_ipv6" ]; then
-			json_add_string "error" "mapcalc failed - WAN6 has IPv6, but MAP-E still has no matching PD/ip6prefix"
-		else
-			json_add_string "error" "mapcalc failed - WAN6 has no global IPv6 address yet"
-		fi
-		json_dump
-		return 1
-	fi
-
-	br="$(jp_ipoe_mapcalc_lookup "$rule_data" BR)"
-	ipv4="$(jp_ipoe_mapcalc_lookup "$rule_data" IPV4ADDR)"
-	portsets="$(jp_ipoe_mapcalc_lookup "$rule_data" PORTSETS)"
-
-	if [ -z "$br" ]; then
-		json_init
-		json_add_string "error" "Could not extract BR address from mapcalc output"
-		json_dump
-		return 1
-	fi
-
-	json_init
-	json_add_string "br_addr" "$br"
-	json_add_string "ipv4" "${ipv4:-}"
-	json_add_string "portsets" "${portsets:-}"
-	json_dump
-}
-
 JP_IPOE_RULES="${JP_IPOE_RULES:-/usr/share/jp-ipoe/mape-rules}"
 
 # Resolve Japan MAP-E (OCN Virtual Connect / JPNE v6plus) rule parameters
@@ -247,9 +196,6 @@ jp_ipoe_info_resolve() {
 case "$1" in
 	status)
 		jp_ipoe_info_status "$2" "$3" "$4"
-		;;
-	detect_br)
-		jp_ipoe_info_detect_br "$2" "$3"
 		;;
 	resolve)
 		jp_ipoe_info_resolve "$2"

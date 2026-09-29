@@ -11,7 +11,6 @@
 #   jp-ipoe-setup stop    - Remove IPoE interfaces
 #   jp-ipoe-setup boot    - Run boot-time IPoE startup recovery
 #   jp-ipoe-setup status  - Print current status as JSON
-#   jp-ipoe-setup detect_br - Attempt to detect BR address
 #
 
 . /lib/functions.sh
@@ -435,33 +434,6 @@ setup_wan6() {
 	log "WAN6 interface $iface configured"
 }
 
-resolve_br_addr() {
-	local wan6_iface="$1"
-	local br_addr="$2"
-	local legacymap="$3"
-	local rule_data
-
-	if [ -n "$br_addr" ]; then
-		printf '%s' "$br_addr"
-		return 0
-	fi
-
-	log "BR address not set, trying to detect via mapcalc..."
-	rule_data=$(LEGACY="$legacymap" mapcalc "$wan6_iface" "type=map-e" 2>/dev/null)
-	if [ $? -eq 0 ] && [ -n "$rule_data" ]; then
-		br_addr="$(jp_ipoe_mapcalc_lookup "$rule_data" BR)"
-		if [ -n "$br_addr" ]; then
-			log "Detected BR address: $br_addr"
-			printf '%s' "$br_addr"
-			return 0
-		fi
-	fi
-
-	log_err "BR address is empty. Manual parameters are required if PD DHCP is disabled."
-	log_err "Please use the map-e calculator (http://ipv4.web.fc2.com/map-e.html) and fill in the BR Address and other parameters in LuCI."
-	return 1
-}
-
 # Configure MAP-E interface via UCI
 setup_mape() {
 	local mape_iface="$1"
@@ -471,7 +443,10 @@ setup_mape() {
 
 	log "Configuring MAP-E interface $mape_iface..."
 
-	br_addr="$(resolve_br_addr "$wan6_iface" "$br_addr" "$legacymap")" || return 1
+	[ -n "$br_addr" ] || {
+		log_err "BR address is empty. Supply complete manual parameters or use a supported Auto Parameters rule."
+		return 1
+	}
 
 	# Create/update MAP-E interface
 	if ! uci -q get network."$mape_iface" >/dev/null 2>&1; then
@@ -940,11 +915,6 @@ cmd_status() {
 	sh "$JP_IPOE_INFO_HELPER" status "$WAN6_IFACE" "$MAPE_IFACE" "$BR_ADDR"
 }
 
-cmd_detect_br() {
-	jp_ipoe_config_load
-	sh "$JP_IPOE_INFO_HELPER" detect_br "$WAN6_IFACE" "$LEGACYMAP"
-}
-
 # Preview the auto-resolved MAP-E parameters for the current WAN6 prefix
 # without applying anything. Prints JP_AUTO_* assignments, or an ERROR: line
 # the LuCI handler can surface. Read-only; safe to run before Apply.
@@ -1017,7 +987,8 @@ configuration_is_current() (
 	section="$(find_network_device_section "$WAN_DEVICE")"
 	[ -z "$section" ] || option_matches "network.$section.ipv6" 1 || return 1
 	[ "$AUTO" != 1 ] || apply_auto_params || return 1
-	peer="$(resolve_br_addr "$WAN6_IFACE" "$BR_ADDR" "$LEGACYMAP")" || return 1
+	peer="$BR_ADDR"
+	[ -n "$peer" ] || return 1
 	[ "$LEGACYMAP" = 1 ] && legacy=1
 	while read -r key value; do
 		option_matches "$key" "$value" || return 1
@@ -1193,7 +1164,7 @@ cmd_apply_status() {
 
 # Serialize mutating operations so a LuCI apply, an SSH run, and the boot
 # service cannot race each other's uci commits and interface bring-up.
-# Read-only commands (status/detect_br, polled by LuCI) run without the lock.
+# Read-only commands (status/apply_status, polled by LuCI) run without the lock.
 #
 # Uses an atomic mkdir lock instead of a held file descriptor (flock): a child
 # process can never inherit and pin an fd-based lock open, and a crashed or
@@ -1256,7 +1227,6 @@ case "$1" in
 	stop)    run_locked cmd_stop ;;
 	boot)    run_locked cmd_boot ;;
 	status)  cmd_status ;;
-	detect_br) cmd_detect_br ;;
 	resolve) cmd_resolve ;;
 	forward_list) sh /usr/libexec/jp-ipoe-forward list ;;
 	forward_devices) ubus call luci-rpc getHostHints '{}' ;;
@@ -1264,7 +1234,7 @@ case "$1" in
 	forward_add6) shift; run_locked sh /usr/libexec/jp-ipoe-forward add6 "$@" ;;
 	forward_remove) shift; run_locked sh /usr/libexec/jp-ipoe-forward remove "$@" ;;
 	*)
-		echo "Usage: $0 {start|repair|apply|apply_repair|apply_status|stop|boot|status|detect_br|resolve|forward_list|forward_devices|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
+		echo "Usage: $0 {start|repair|apply|apply_repair|apply_status|stop|boot|status|resolve|forward_list|forward_devices|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
 		exit 1
 		;;
 esac

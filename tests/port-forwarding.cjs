@@ -618,8 +618,14 @@ AUTO=1
 check_writes ensure_wan6_ip6prefix access6 eth0
 `, setup + uciFaults);
 
+  run('MAP-E requires a BR before writes, without incomplete mapcalc fallback', `
+uci() { fail unexpected-write; }
+mapcalc() { fail incomplete-rule-fallback; }
+setup_mape ip4map access6 '' 1 2> "$TEST_TMP/br-error" && fail missing-br-accepted
+grep -q '^ERROR: BR address is empty' "$TEST_TMP/br-error" || fail missing-diagnostic
+`, setup);
+
   run('MAP-E UCI failures stop writes for set and clear paths', `
-resolve_br_addr() { echo 2001:db8::1; }
 for bounds in set clear; do
  if [ "$bounds" = set ]; then IPADDR=203.0.113.1; IP4PREFIXLEN=32; else IPADDR=''; IP4PREFIXLEN=''; fi
  for legacy in 0 1; do check_writes setup_mape ip4map access6 2001:db8::1 "$legacy"; done
@@ -691,7 +697,6 @@ uci() {
  [ "$key" != network.ip4map ] || name=DB_network_ip4map_TYPE
  export "$name=$value"
 }
-resolve_br_addr() { echo 2001:db8::1; }
 validate_config() { validate_interface_roles; }
 apply_map_protocol() { :; }
 apply_network_config() { setup_mape ip4map access6 2001:db8::1 1; }
@@ -1591,12 +1596,12 @@ done
   const wrappedScript = read('root/usr/libexec/jp-ipoe-readonly').replaceAll('/usr/sbin/jp-ipoe-setup', fakeSetup);
   const runWrapper = (args) => cp.spawnSync('sh', ['-c', wrappedScript, 'jp-ipoe-readonly'].concat(args),
     { cwd: root, encoding: 'utf8' });
-  for (const args of [['status'], ['detect_br'], ['resolve'], ['apply_status'], ['forward_list'], ['forward_devices']]) {
+  for (const args of [['status'], ['resolve'], ['apply_status'], ['forward_list'], ['forward_devices']]) {
     const r = runWrapper(args);
     assert.equal(r.status, 0, 'wrapper must allow ' + args.join(' ') + '\n' + r.stderr);
     assert.equal(r.stdout.trim(), 'RAN: ' + args[0]);
   }
-  for (const args of [['start'], ['stop'], ['repair'], ['boot'], ['apply'], ['apply_repair'],
+  for (const args of [['detect_br'], ['start'], ['stop'], ['repair'], ['boot'], ['apply'], ['apply_repair'],
     ['forward_add', 'tcp', '192.168.1.10', '80', ''],
     ['forward_add6', 'tcp', '2001:db8::10', '22'],
     ['forward_remove', 'saved'], ['status', 'extra'], [], ['status;reboot']]) {
@@ -1730,36 +1735,19 @@ done
     orderedOps.push('exec:' + args[0]);
     return Promise.resolve({ code: 0, stdout: 'JP_IPOE_APPLY=' + args[0], stderr: '' });
   };
-  uciMock.set = (conf, section, key, value) => {
-    assert.deepEqual([conf, section, key, value], ['jp_ipoe', 'config', 'br_addr', '2001:db8::1']);
-    orderedOps.push('set:jp_ipoe');
-  };
-  uciMock.save = () => formMap.save(null, true);
-  for (failedStep of ['', 'save', 'commit']) {
-    orderedOps.length = 0;
-    await view.saveAndApplyBR('2001:db8::1');
-    const expected = ['set:jp_ipoe', 'save'];
-    if (failedStep !== 'save') expected.push('commit:jp_ipoe');
-    if (!failedStep) expected.push('exec:apply', 'poll');
-    assert.deepEqual(orderedOps, expected);
-  }
   view.canWrite = false;
   orderedOps.length = 0;
   await view.applyIPoE(formMap, false);
   await view.applyIPoE(formMap, true);
-  await view.saveAndApplyBR('2001:db8::1');
   assert.deepEqual(orderedOps, [], 'read-only actions must not save, commit or execute');
-  console.log('PASS real Apply/Repair/BR save ordering, targeted commit, failure stops and read-only gates');
+  console.log('PASS real Apply/Repair save ordering, targeted commit, failure stops and read-only gates');
 
-  // The helper reports detection failures as JSON with a non-zero exit code.
-  executeCommand = () => Promise.resolve({ code: 1, stdout: '{"error":"no PD"}', stderr: '' });
-  messages.length = 0;
-  await view.detectBR();
-  assert(messages.some(m => /Detection failed: no PD/.test(m)), 'detect_br error detail must surface');
+  assert.equal(view.detectBR, undefined, 'BR detection without MAP prefixes cannot work');
+  assert.equal(view.saveAndApplyBR, undefined);
   // rpcd's uci commit emits config.change; a reload trigger would restart
   // (stop + start) behind every LuCI Apply.
   assert.doesNotMatch(read('root/etc/init.d/jp_ipoe'), /procd_add_reload_trigger|reload_service/);
-  console.log('PASS BR detection error detail and no config reload trigger');
+  console.log('PASS no dead BR action and no config reload trigger');
 
 
   console.log(`PASS ${count} backend checks + package/UI structure and shell/JS syntax. Real browser/OpenWrt kernel not exercised.`);

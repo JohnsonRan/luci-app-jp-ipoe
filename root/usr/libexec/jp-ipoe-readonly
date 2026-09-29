@@ -6,7 +6,7 @@
 # path cannot mutate anything.
 
 case "$#:$1" in
-	1:status|1:detect_br|1:resolve|1:apply_status|1:forward_list|1:forward_devices)
+	1:status|1:resolve|1:apply_status|1:forward_list|1:forward_devices)
 		exec /usr/sbin/jp-ipoe-setup "$1"
 		;;
 	*)

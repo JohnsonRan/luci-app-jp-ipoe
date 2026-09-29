@@ -58,7 +58,7 @@ A successful package build is not a live-line connectivity test.
 | [`jp-ipoe-setup`](../root/usr/sbin/jp-ipoe-setup) | Validation, setup/stop/repair/boot, shared mutation lock and command dispatch. |
 | [`jp-ipoe-readonly`](../root/usr/libexec/jp-ipoe-readonly) | Executable, single-argument inspection whitelist for read-only LuCI sessions. |
 | [`config.sh`](../root/usr/share/jp-ipoe/config.sh) | Loads plugin settings and saved IPv4 forwarding rules from UCI. |
-| [`jp-ipoe-info`](../root/usr/libexec/jp-ipoe-info) | Status, BR detection and offline MAP-E parameter lookup. |
+| [`jp-ipoe-info`](../root/usr/libexec/jp-ipoe-info) | Status and offline MAP-E parameter lookup. |
 | [`map.sh`](../root/usr/share/jp-ipoe/map.sh) | Patched netifd MAP protocol handler; publishes redirects after SNAT reservation. |
 | [`jp-ipoe-map-nft`](../root/usr/libexec/jp-ipoe-map-nft) | Generates, checks and removes per-interface SNAT tables. |
 | [`jp-ipoe-forward`](../root/usr/libexec/jp-ipoe-forward), [`forward.sh`](../root/usr/share/jp-ipoe/forward.sh) | Validates and updates IPv4 forwarding and native IPv6 allowances. |
@@ -106,9 +106,8 @@ read-only `apply_status` prints the log; the run ends with a
 `JP_IPOE_APPLY_RC=<code>` line. The UI polls every 2s up to 5 minutes, then
 reports the `ERROR:` lines, the unchanged marker, success, or (no marker) a
 warning that no result was reported. `start`, `repair`, `stop` and `boot`
-remain synchronous for SSH and the init script. BR save uses
-the same targeted commit; do not use global `uci.apply()` to apply unrelated
-pending packages. Read ACL permits only the strict `jp-ipoe-readonly` wrapper;
+remain synchronous for SSH and the init script. Do not use global `uci.apply()`
+to apply unrelated pending packages. Read ACL permits only the strict `jp-ipoe-readonly` wrapper;
 write ACL permits the setup path and targeted UCI commit. Mutation handlers also
 check session permissions. The wrapper must retain executable Git mode because
 `fs.exec` invokes it directly. Validate both ACL enforcement and session handoff
@@ -301,7 +300,6 @@ state; `repair` deliberately interrupts traffic.
 ```sh
 jp-ipoe-setup status
 jp-ipoe-setup resolve
-jp-ipoe-setup detect_br
 jp-ipoe-setup start
 jp-ipoe-setup repair
 jp-ipoe-setup stop

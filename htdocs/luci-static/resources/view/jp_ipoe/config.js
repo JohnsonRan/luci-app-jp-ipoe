@@ -13,7 +13,7 @@
 // path and are gated by this.canWrite.
 var SETUP_SCRIPT = '/usr/sbin/jp-ipoe-setup';
 var READONLY_SCRIPT = '/usr/libexec/jp-ipoe-readonly';
-var READONLY_ACTIONS = { status: 1, detect_br: 1, resolve: 1, apply_status: 1, forward_list: 1, forward_devices: 1 };
+var READONLY_ACTIONS = { status: 1, resolve: 1, apply_status: 1, forward_list: 1, forward_devices: 1 };
 // fs.exec is bounded (20s XHR timeout, rpcd SIGKILL at its exec timeout) while
 // a full setup can wait minutes for WAN6, so start/repair run detached and
 // the UI polls apply_status for the JP_IPOE_APPLY_RC line.
@@ -331,14 +331,6 @@ return view.extend({
 		o.description = _('Preview from the WAN6 prefix without applying. Requires a global WAN6 IPv6 address.');
 		o.onclick = function() {
 			return self.previewParams();
-		};
-
-		o = s2.option(form.Button, '_detect_br', _('Auto-Detect BR Address'));
-		o.inputstyle = 'neutral';
-		o.description = _('Detect BR from the live MAP-E rule, then optionally save and apply. Manual mode only.');
-		o.depends('auto', '0');
-		o.onclick = function() {
-			return self.detectBR();
 		};
 
 		return m.render().then(function(formNode) {
@@ -774,70 +766,6 @@ return view.extend({
 		}
 		el.style.color = isOk === true ? '#4caf50' : isOk === false ? '#f44336' : '';
 		el.style.fontWeight = isBold === true ? 'bold' : 'normal';
-	},
-
-	detectBR: function() {
-		var self = this;
-		ui.addTimeLimitedNotification(null, E('p', _('Detecting BR address via mapcalc...')), 5000, 'info');
-
-		return this.execSetup(['detect_br']).then(function(res) {
-			var errMsg = _('Detection failed');
-
-			// The helper prints {"error": ...} with a non-zero exit code.
-			try {
-				var data = JSON.parse(res.stdout);
-				if (res.code === 0 && data.br_addr)
-					return self.promptSaveBR(data.br_addr);
-				if (data.error)
-					errMsg += ': ' + data.error;
-			} catch (e) {}
-
-			ui.addNotification(null, E('p', errMsg), 'error');
-		}).catch(function(e) {
-			ui.addNotification(null, E('p', _('Detection error')), 'error');
-		});
-	},
-
-	promptSaveBR: function(br) {
-		var self = this;
-		ui.showModal(_('Save BR Address'), [
-			E('p', {}, _('Save detected BR address to configuration and re-apply IPoE?')),
-			E('p', {}, E('strong', {}, br)),
-			E('div', { 'class': 'right' }, [
-				E('button', {
-					'class': 'btn cbi-button cbi-button-neutral',
-					'click': ui.hideModal
-				}, _('Cancel')),
-				' ',
-				E('button', {
-					'class': 'btn cbi-button cbi-button-positive',
-					'click': ui.createHandlerFn(self, function() {
-						return self.saveAndApplyBR(br);
-					})
-				}, _('Save & Apply'))
-			])
-		]);
-	},
-
-	saveAndApplyBR: function(br) {
-		var self = this;
-		if (!this.requireWrite())
-			return;
-		uci.set('jp_ipoe', 'config', 'br_addr', br);
-		// Targeted commit (not uci.apply, which would commit every pending
-		// config); a failure stops before start runs on stale config.
-		return uci.save()
-			.then(function() { return self.commitJpIpoe(); })
-			.then(function() {
-				ui.hideModal();
-				return self.runApply('apply',
-					_('BR address saved and IPoE re-applied.'),
-					_('BR address saved, but IPoE re-apply failed.'));
-			})
-			.catch(function(e) {
-				ui.hideModal();
-				ui.addNotification(null, E('p', _('Failed to save BR address; nothing was applied.') + ' ' + (e.message || e)), 'error');
-			});
 	},
 
 	handleSaveApply: null,

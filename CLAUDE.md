@@ -13,11 +13,11 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 
 | Path | Role |
 |---|---|
-| `root/usr/sbin/jp-ipoe-setup` | Entry point: `start`, `repair`, `apply`/`apply_repair`/`apply_status`, `stop`, `boot`, `status`, `detect_br`, `resolve`, `forward_*`. Mutations run under `run_locked`. |
+| `root/usr/sbin/jp-ipoe-setup` | Entry point: `start`, `repair`, `apply`/`apply_repair`/`apply_status`, `stop`, `boot`, `status`, `resolve`, `forward_*`. Mutations run under `run_locked`. |
 | `root/usr/share/jp-ipoe/config.sh` | `jp_ipoe_config_load` defaults, shared helpers (`jp_ipoe_mapcalc_lookup`, `find_pppoe_sections`). |
 | `root/usr/share/jp-ipoe/map.sh` | Patched netifd MAP protocol; installed by `jp-ipoe-install-map` (backup `map.sh.orig`, `restore` on prerm). |
 | `root/usr/libexec/jp-ipoe-map-nft` | Multi-range SNAT table `inet jpipoe_<cfg>`. |
-| `root/usr/libexec/jp-ipoe-info` | Status JSON, BR detection, offline rule lookup (`resolve`, `resolve_addr`) from `mape-rules`. |
+| `root/usr/libexec/jp-ipoe-info` | Status JSON, offline rule lookup (`resolve`, `resolve_addr`) from `mape-rules`. |
 | `root/usr/libexec/jp-ipoe-forward` + `share/jp-ipoe/forward.sh` | IPv4 DNAT forwards (netifd data) and native IPv6 fw4 rules. |
 | `root/usr/libexec/jp-ipoe-readonly` | Only exec path for the read ACL. |
 | `htdocs/.../view/jp_ipoe/config.js` | Single view, three client-side tabs (Configuration / Status / Port Forwarding). |
@@ -45,7 +45,7 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 - `wan6.ip6prefix` only when relay, auto or manual MAP/BR parameters need it.
 
 **PPPoE fallback**
-- `boot` stops managed IPoE and WAN PPPoE, restarts WAN6, then forces full setup. Keep this separate from normal `start`.
+- `boot` stops managed IPoE and WAN PPPoE, restarts WAN6, then forces full setup. This sequence is explicitly required by the user; do not simplify away stop or WAN6 restart. Keep this separate from normal `start`.
 - `run_locked` restores stopped PPPoE while still holding the lock, on success, failure and INT/TERM/HUP. A failed restore makes the operation fail.
 
 **Patched `map.sh`**
@@ -67,8 +67,8 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 - Persistent fw4 ACCEPT rules in the `jp_ipoe6_*` namespace that survive stop and uninstall; the UI must say so.
 
 **LuCI and backend output**
-- Read ACL execs only `jp-ipoe-readonly` (`status`, `detect_br`, `resolve`, `apply_status`, `forward_list`, `forward_devices`); the write ACL execs `jp-ipoe-setup`.
-- Apply/BR-save commits only `jp_ipoe` (never `uci.apply`), and save/commit failure stops the chain.
+- Read ACL execs only `jp-ipoe-readonly` (`status`, `resolve`, `apply_status`, `forward_list`, `forward_devices`); the write ACL execs `jp-ipoe-setup`.
+- Apply commits only `jp_ipoe` (never `uci.apply`), and save/commit failure stops the chain.
 - Backend lines starting with `ERROR:` are what LuCI shows the user; keep the prefix.
 - Status conntrack values: empty means unavailable, never zero.
 
