@@ -5,6 +5,9 @@
 			"file": {
 				"/usr/libexec/jp-ipoe-readonly": [ "exec" ]
 			},
+			"ubus": {
+				"luci-rpc": [ "getHostHints" ]
+			},
 			"uci": [ "jp_ipoe" ]
 		},
 		"write": {

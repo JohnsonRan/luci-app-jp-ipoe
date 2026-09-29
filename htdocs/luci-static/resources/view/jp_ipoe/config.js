@@ -13,12 +13,19 @@
 // path and are gated by this.canWrite.
 var SETUP_SCRIPT = '/usr/sbin/jp-ipoe-setup';
 var READONLY_SCRIPT = '/usr/libexec/jp-ipoe-readonly';
-var READONLY_ACTIONS = { status: 1, resolve: 1, apply_status: 1, forward_list: 1, forward_devices: 1 };
+var READONLY_ACTIONS = { status: 1, resolve: 1, apply_status: 1, forward_list: 1 };
 // fs.exec is bounded (20s XHR timeout, rpcd SIGKILL at its exec timeout) while
 // a full setup can wait minutes for WAN6, so start/repair run detached and
 // the UI polls apply_status for the JP_IPOE_APPLY_RC line.
 var APPLY_POLL_MS = 2000;
 var APPLY_DEADLINE_MS = 5 * 60 * 1000;
+
+var getHostHints = rpc.declare({
+	object: 'luci-rpc',
+	method: 'getHostHints',
+	expect: { '': {} },
+	reject: true
+});
 
 var queryWriteAccess = rpc.declare({
 	object: 'session',
@@ -516,10 +523,8 @@ return view.extend({
 
 	loadForwardDevices: function() {
 		var self = this;
-		return this.execSetup(['forward_devices']).then(function(res) {
-			if (res.code !== 0)
-				throw new Error(self.formatCommandOutput(res));
-			self.forwardDevices = JSON.parse(res.stdout);
+		return getHostHints().then(function(devices) {
+			self.forwardDevices = devices;
 			var select = document.getElementById('jp-forward-device'), previous = select.value;
 			select.textContent = '';
 			select.appendChild(E('option', { 'value': '' }, _('Enter addresses manually')));

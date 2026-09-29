@@ -295,7 +295,8 @@ the disabled rule for retry and report inspection failure. Other rules or
 existing connections may still allow access. Rules intentionally survive MAP-E
 stop, reboot and plugin uninstall; preserve this warning in the UI/user guide.
 
-Device selection uses stock `luci-rpc getHostHints` through the setup wrapper.
+Device selection calls stock `luci-rpc getHostHints` directly through LuCI RPC,
+with an explicit read ACL grant, not a setup shell wrapper.
 It fills current addresses and offers global IPv6 candidates, with manual input
 as fallback. It is not dynamic MAC binding. Dual-stack creation executes two
 independently saved commands sequentially and must report partial success.
@@ -323,7 +324,7 @@ usable public service endpoints. `forward_add` / `forward_add6` expose services.
 
 ```sh
 jp-ipoe-setup forward_list
-jp-ipoe-setup forward_devices
+ubus call luci-rpc getHostHints '{}'
 jp-ipoe-setup forward_add tcp 192.168.1.10 8080
 jp-ipoe-setup forward_add tcpudp 192.168.1.10 8080 24080
 jp-ipoe-setup forward_add6 tcp 2001:db8::10 8080

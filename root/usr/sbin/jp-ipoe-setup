@@ -1213,12 +1213,11 @@ case "$1" in
 	status)  cmd_status ;;
 	resolve) cmd_resolve ;;
 	forward_list) sh /usr/libexec/jp-ipoe-forward list ;;
-	forward_devices) ubus call luci-rpc getHostHints '{}' ;;
 	forward_add) shift; run_locked sh /usr/libexec/jp-ipoe-forward add "$@" ;;
 	forward_add6) shift; run_locked sh /usr/libexec/jp-ipoe-forward add6 "$@" ;;
 	forward_remove) shift; run_locked sh /usr/libexec/jp-ipoe-forward remove "$@" ;;
 	*)
-		echo "Usage: $0 {start|repair|apply|apply_repair|apply_status|stop|boot|status|resolve|forward_list|forward_devices|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
+		echo "Usage: $0 {start|repair|apply|apply_repair|apply_status|stop|boot|status|resolve|forward_list|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
 		exit 1
 		;;
 esac

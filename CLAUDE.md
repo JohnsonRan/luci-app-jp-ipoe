@@ -68,7 +68,7 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 - Persistent fw4 ACCEPT rules in the `jp_ipoe6_*` namespace that survive stop and uninstall; the UI must say so.
 
 **LuCI and backend output**
-- Read ACL execs only `jp-ipoe-readonly` (`status`, `resolve`, `apply_status`, `forward_list`, `forward_devices`); the write ACL execs `jp-ipoe-setup`.
+- Read ACL execs only `jp-ipoe-readonly` (`status`, `resolve`, `apply_status`, `forward_list`); host hints use direct `luci-rpc.getHostHints` with a read ubus grant. The write ACL execs `jp-ipoe-setup`.
 - Apply commits only `jp_ipoe` (never `uci.apply`), and save/commit failure stops the chain.
 - Backend lines starting with `ERROR:` are what LuCI shows the user; keep the prefix.
 - Status conntrack values: empty means unavailable, never zero.

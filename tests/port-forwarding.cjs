@@ -1477,8 +1477,17 @@ done
   let modal, notifications = 0, executions = 0;
   const messages = [], elements = {};
   let executeCommand = () => { executions++; throw new Error('Unexpected duplicate submission'); };
+  let hostHintsReply = {};
+  const hostHintCalls = [];
   const rpcMock = {
     declare: (spec) => (...args) => {
+      if (spec.object === 'luci-rpc' && spec.method === 'getHostHints') {
+        assert.deepEqual(spec.expect, { '': {} });
+        assert.equal(spec.reject, true, 'RPC failures must reach manual-entry warning');
+        assert.deepEqual(args, []);
+        hostHintCalls.push(spec.method);
+        return hostHintsReply instanceof Error ? Promise.reject(hostHintsReply) : Promise.resolve(hostHintsReply);
+      }
       if (spec.object === 'session' && spec.method === 'access')
         return Promise.resolve(view.canWrite !== false);
       if (spec.object === 'uci' && spec.method === 'commit') {
@@ -1537,11 +1546,32 @@ done
   console.log('PASS forwarding UI collapsed details, range list and compact fields');
   for (const id of ['device', 'family', 'ip', 'port', 'ip6', 'ip6-options', 'ip-field', 'port-field', 'ip6-field'])
     elements['jp-forward-' + id] = { value: '', disabled: false, style: {}, appendChild: () => {} };
-  view.forwardDevices = { 'aa:bb:cc:dd:ee:ff': { ipaddrs: ['192.168.1.10'], ip6addrs: ['fe80::10', 'fd00::10', '2001:db8::10'] } };
-  elements['jp-forward-device'].value = 'aa:bb:cc:dd:ee:ff';
+  hostHintsReply = { 'aa:bb:cc:dd:ee:ff': { name: 'desktop', ipaddrs: ['192.168.1.10'], ip6addrs: ['fe80::10', 'fd00::10', '2001:db8::10'] } };
+  const deviceOptions = [];
+  const deviceSelect = elements['jp-forward-device'];
+  deviceSelect.appendChild = node => deviceOptions.push(node);
+  Object.defineProperty(deviceSelect, 'textContent', { set() { deviceOptions.length = 0; } });
+  deviceSelect.value = 'aa:bb:cc:dd:ee:ff';
+  view.canWrite = false;
+  await view.loadForwardDevices();
+  assert.deepEqual(hostHintCalls, ['getHostHints']);
+  assert.equal(executions, 0, 'host hints must not use fs.exec');
+  assert.deepEqual(view.forwardDevices, hostHintsReply);
+  assert.deepEqual(deviceOptions.map(n => n.attrs.value), ['', 'aa:bb:cc:dd:ee:ff']);
+  assert.match(deviceOptions[1].children, /desktop.*aa:bb:cc:dd:ee:ff.*192\.168\.1\.10/);
+  assert.equal(deviceSelect.value, 'aa:bb:cc:dd:ee:ff', 'refresh preserves selected device');
   view.selectForwardDevice();
   assert.equal(elements['jp-forward-ip'].value, '192.168.1.10');
   assert.equal(elements['jp-forward-ip6'].value, '2001:db8::10');
+  hostHintsReply = {};
+  await view.loadForwardDevices();
+  assert.deepEqual(deviceOptions.map(n => n.attrs.value), [''], 'empty hints retain manual input');
+  hostHintsReply = new Error('permission denied');
+  await view.loadForwardDevices();
+  assert(messages.some(m => /Unable to load devices. Enter addresses manually/.test(m)));
+  assert.equal(elements['jp-forward-ip'].value, '192.168.1.10', 'RPC failure must not erase address input');
+  view.canWrite = true;
+  console.log('PASS direct host-hints RPC: read-only access, options, selection, empty result and manual-entry fallback');
   for (const family of ['ipv4', 'ipv6', 'dual']) {
     elements['jp-forward-family'].value = family;
     view.updateForwardFamily();
@@ -1693,12 +1723,12 @@ done
   const wrappedScript = read('root/usr/libexec/jp-ipoe-readonly').replaceAll('/usr/sbin/jp-ipoe-setup', fakeSetup);
   const runWrapper = (args) => cp.spawnSync('sh', ['-c', wrappedScript, 'jp-ipoe-readonly'].concat(args),
     { cwd: root, encoding: 'utf8' });
-  for (const args of [['status'], ['resolve'], ['apply_status'], ['forward_list'], ['forward_devices']]) {
+  for (const args of [['status'], ['resolve'], ['apply_status'], ['forward_list']]) {
     const r = runWrapper(args);
     assert.equal(r.status, 0, 'wrapper must allow ' + args.join(' ') + '\n' + r.stderr);
     assert.equal(r.stdout.trim(), 'RAN: ' + args[0]);
   }
-  for (const args of [['detect_br'], ['start'], ['stop'], ['repair'], ['boot'], ['apply'], ['apply_repair'],
+  for (const args of [['detect_br'], ['forward_devices'], ['start'], ['stop'], ['repair'], ['boot'], ['apply'], ['apply_repair'],
     ['forward_add', 'tcp', '192.168.1.10', '80', ''],
     ['forward_add6', 'tcp', '2001:db8::10', '22'],
     ['forward_remove', 'saved'], ['status', 'extra'], [], ['status;reboot']]) {
@@ -1714,6 +1744,7 @@ done
   assert(!('/usr/sbin/jp-ipoe-setup' in (acl.read.file || {})), 'read ACL must not reach the writable path');
   assert.deepEqual(acl.write.file, { '/usr/sbin/jp-ipoe-setup': ['exec'] });
   assert.deepEqual(acl.write.ubus, { uci: ['commit'] }, 'targeted commit needs an explicit ubus grant');
+  assert.deepEqual(acl.read.ubus, { 'luci-rpc': ['getHostHints'] }, 'only host-hints RPC added to read grant');
   console.log('PASS read-only wrapper whitelist and ACL split (mutations refused, inspection allowed)');
 
   // UI permission gating: read-only users keep inspection through the
