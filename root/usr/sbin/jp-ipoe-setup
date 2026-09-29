@@ -357,27 +357,13 @@ ensure_wan6_duid_ll() {
 	uci set network."$iface".clientid="$expected_duid"
 }
 
-# MAP-E still needs wan6.ip6prefix when relay mode is enabled or when the
-# tunnel is being driven by manual MAP bounds / BR settings.
-wan6_ip6prefix_required() {
-	[ "$AUTO" = "1" ] && return 0
-	[ "$DHCPV6_RELAY" = "1" ] && return 0
-	[ -n "$IPADDR" ] && return 0
-	[ -n "$IP6PREFIX" ] && return 0
-	[ -n "$BR_ADDR" ] && return 0
-	return 1
-}
-
+# Every valid setup uses Auto Parameters or complete manual MAP bounds.
+# Both need the current WAN6 prefix for mapcalc, with or without LAN relay.
 ensure_wan6_ip6prefix() {
 	local wan6_iface="$1"
 	local wan6_dev="$2"
 	local ip6prefix
 	local current_prefix
-
-	if ! wan6_ip6prefix_required; then
-		log "Leaving $wan6_iface ip6prefix unchanged; MAP-E is using automatic PD matching."
-		return 0
-	fi
 
 	ip6prefix=$(get_ipv6_prefix "$wan6_iface" "$wan6_dev") || return 1
 
@@ -963,7 +949,7 @@ option_matches() {
 # Deliberately owned state only: runtime drift (SNAT table contents, routes,
 # forwarding data) is what Repair is for.
 configuration_is_current() (
-	local package changes section key value wan6_dev ipv6 prefix="" mac duid
+	local package changes section key value wan6_dev ipv6 prefix mac duid
 	local wan_zone networks peer legacy="" rule saved fresh suffix
 	# A probe that falls back to the full pipeline is not an error.
 	log() { :; }; log_err() { :; }
@@ -977,9 +963,7 @@ configuration_is_current() (
 	network_is_up "$WAN6_IFACE" && network_is_up "$MAPE_IFACE" || return 1
 	network_get_device wan6_dev "$WAN6_IFACE" && [ "$wan6_dev" = "$WAN_DEVICE" ] || return 1
 	network_get_subnet6 ipv6 "$WAN6_IFACE" && [ -n "$ipv6" ] || return 1
-	if wan6_ip6prefix_required; then
-		prefix="$(get_ipv6_prefix "$WAN6_IFACE" "$wan6_dev")" || return 1
-	fi
+	prefix="$(get_ipv6_prefix "$WAN6_IFACE" "$wan6_dev")" || return 1
 	mac="$(get_device_mac "$WAN_DEVICE")" || return 1
 	duid="$(uci -q get network."$WAN6_IFACE".clientid)"
 	[ -n "$duid" ] || duid="$(uci -q get network.globals.dhcp_default_duid)"

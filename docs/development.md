@@ -199,9 +199,10 @@ separators, for example `00030001aabbccddeeff`. The effective interface/global
 DUID is checked first. If needed, only WAN6's `clientid` is written; the global
 default DUID is left untouched.
 
-`wan6.ip6prefix` is set when relay or manual MAP/BR parameters require it.
-Auto mode also sets it using the resolved rule; PD-matched setups that do not
-require it leave it unset.
+Every valid configuration uses Auto Parameters or complete manual MAP/BR
+parameters, so both modes manage `wan6.ip6prefix` from the current WAN6 prefix,
+regardless of LAN relay mode. Manual mode requires `br_addr`, `ipaddr` and
+`ip6prefix` before any setup writes; there is no prefixless PD-matching mode.
 
 Automatic lookup uses the bundled [`mape-rules`](../root/usr/share/jp-ipoe/mape-rules)
 data: JPNE tables `38` / `31` and OCN table `38_20`. `resolve` supplies the

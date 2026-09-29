@@ -618,6 +618,39 @@ AUTO=1
 check_writes ensure_wan6_ip6prefix access6 eth0
 `, setup + uciFaults);
 
+  run('WAN6 prefix: auto/manual and relay/server modes derive current prefix, unchanged skips writes', `
+WAN_DEVICE=eth0
+validate_interface_roles() { :; }; resolve_ipoe_firewall_zone() { echo wan; }
+get_ipv6_prefix() { [ "$PREFIX_FAIL" != 1 ] || return 1; echo 2001:db8:1::/64; }
+uci() {
+ case "$*" in
+  '-q get network.access6.ip6prefix') printf '%s' "$CURRENT_PREFIX";;
+  'set network.access6.ip6prefix=2001:db8:1::/64') ORDER="$ORDER"'set ';;
+  'commit network') ORDER="$ORDER"'commit ';;
+  *) fail "unexpected UCI $*";;
+ esac
+}
+ifup() { [ "$1" = access6 ] || fail wrong-interface; ORDER="$ORDER"'ifup '; }
+wait_for_ipv6() { ORDER="$ORDER"'wait'; }
+for AUTO in 0 1; do
+ for DHCPV6_RELAY in 0 1; do
+  BR_ADDR=''; IPADDR=''; IP6PREFIX=''
+  if [ "$AUTO" = 0 ]; then BR_ADDR=2001:db8::1; IPADDR=203.0.113.0; IP6PREFIX=2001:db8::; fi
+  validate_config || fail invalid-fixture
+  CURRENT_PREFIX=2001:db8::/64; ORDER=''
+  ensure_wan6_ip6prefix access6 eth0 || fail derive
+  [ "$ORDER" = 'set commit ifup wait' ] || fail "derive order $ORDER"
+  CURRENT_PREFIX=2001:db8:1::/64; ORDER=''
+  ensure_wan6_ip6prefix access6 eth0 || fail unchanged
+  [ -z "$ORDER" ] || fail unnecessary-mutation
+  PREFIX_FAIL=1
+  ensure_wan6_ip6prefix access6 eth0 && fail ignored-prefix-error
+  [ -z "$ORDER" ] || fail mutation-after-prefix-error
+  PREFIX_FAIL=0
+ done
+done
+`, setup);
+
   run('MAP-E requires a BR before writes, without incomplete mapcalc fallback', `
 uci() { fail unexpected-write; }
 mapcalc() { fail incomplete-rule-fallback; }

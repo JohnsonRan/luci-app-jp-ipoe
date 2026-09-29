@@ -42,7 +42,7 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 
 **DUID and prefix**
 - DUID-LL is `00030001`+WAN MAC, written only as the WAN6 `clientid`. Never touch the global DUID.
-- `wan6.ip6prefix` only when relay, auto or manual MAP/BR parameters need it.
+- Every valid configuration (auto or complete manual MAP/BR parameters) manages `wan6.ip6prefix`, regardless of LAN relay mode. Derive it from current WAN6 state, never a saved prefix.
 
 **PPPoE fallback**
 - `boot` stops managed IPoE and WAN PPPoE, restarts WAN6, then forces full setup. This sequence is explicitly required by the user; do not simplify away stop or WAN6 restart. Keep this separate from normal `start`.
