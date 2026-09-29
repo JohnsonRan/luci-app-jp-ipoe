@@ -39,8 +39,11 @@ comment so OpenWrt's package scanner discovers the package.
 live upgrade. The init script skips its setup teardown when `PKG_UPGRADE=1`:
 opkg's default removal hook still calls service stop during upgrades, but
 `enabled=0` users may have manually applied MAP-E and postinst will not restart
-it. Ordinary stop and boot behavior are unchanged. OpenWrt 25.12 apk uses
-separate upgrade hooks (no pre-deinstall on upgrade).
+it. This only protects subsequent upgrades after the guarded init script is
+installed: the first opkg upgrade from an older package still executes its old,
+unconditional stop hook before replacing files. Expect disruption and manually
+Apply again if Enable at Boot is off. Ordinary stop and boot behavior are
+unchanged. OpenWrt 25.12 apk uses separate upgrade hooks (no pre-deinstall on upgrade).
 
 On live uninstall, `prerm` explicitly stops the service before restoring the
 saved stock handler, so netifd teardown can still use the patched handler and

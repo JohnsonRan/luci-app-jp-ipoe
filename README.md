@@ -61,6 +61,12 @@ firmware's package repositories is needed.
 Installation also replaces `/lib/netifd/proto/map.sh` with the bundled MAP
 handler. An existing unpatched handler is backed up as `map.sh.orig`.
 
+**First upgrade from an older 24.10 ipk:** the previously installed removal
+script can still stop MAP-E before the new files arrive. Keep local LAN access;
+if **Enable at Boot** is off, manually Apply again after upgrading. Upgrade
+preservation only applies to subsequent upgrades once the guarded init script
+is installed. OpenWrt 25.12 apk uses separate upgrade hooks.
+
 ## First setup
 
 **Back up your configuration and keep local LAN access to the router.** Apply
