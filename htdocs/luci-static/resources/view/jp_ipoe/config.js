@@ -248,15 +248,17 @@ return view.extend({
 		o.default = o.disabled;
 		o.rmempty = false;
 
+		// Manual mode: BR, ipaddr and ip6prefix are required (validate_config
+		// rejects them too); the numeric fields fall back to the OCN defaults.
 		o = s.option(form.Value, 'br_addr', _('BR Address (Border Relay)'), _('Border Relay IPv6 address, from the MAP-E calculator (http://ipv4.web.fc2.com/map-e.html).'));
 		o.datatype = 'ip6addr';
-		o.optional = true;
+		o.rmempty = false;
 		o.placeholder = '2001:f88:...';
 		o.depends('auto', '0');
 
 		o = s.option(form.Value, 'ipaddr', _('IPv4 Prefix (ipaddr)'), _('Mapped IPv4 prefix calculated from the MAP-E calculator (e.g. 153.153.153.153).'));
 		o.datatype = 'ip4addr';
-		o.optional = true;
+		o.rmempty = false;
 		o.depends('auto', '0');
 
 		o = s.option(form.Value, 'ip4prefixlen', _('IPv4 Prefix Length'), _('Normally 20 for OCN.'));
@@ -267,7 +269,7 @@ return view.extend({
 
 		o = s.option(form.Value, 'ip6prefix', _('IPv6 Prefix'), _('Mapped IPv6 prefix (e.g. 2400:4050::).'));
 		o.datatype = 'ip6addr';
-		o.optional = true;
+		o.rmempty = false;
 		o.depends('auto', '0');
 
 		o = s.option(form.Value, 'ip6prefixlen', _('IPv6 Prefix Length'), _('Normally 38 for OCN.'));

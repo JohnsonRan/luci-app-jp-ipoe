@@ -814,6 +814,13 @@ validate_config() {
 		return 1
 	}
 
+	# mapcalc needs a real ipv6prefix/ipv4prefix; the numeric defaults alone
+	# produce a rule that only fails inside netifd (INVALID_MAP_RULE).
+	if [ "$AUTO" != 1 ] && { [ -z "$IPADDR" ] || [ -z "$IP6PREFIX" ] || [ -z "$BR_ADDR" ]; }; then
+		log_err "Manual mode needs the BR address, IPv4 prefix (ipaddr) and IPv6 prefix from the MAP-E calculator; enable Auto Parameters to look them up from the WAN6 prefix instead."
+		return 1
+	fi
+
 	# The SNAT helper rejects this list at bringup, where the only symptom
 	# would be a MAP-E interface that never comes up.
 	for port in $DONT_SNAT_TO; do

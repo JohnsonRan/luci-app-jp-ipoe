@@ -97,9 +97,9 @@ enter the BR address and complete MAP-E parameters supplied by your provider,
 ISP router, or the [MAP-E calculator](http://ipv4.web.fc2.com/map-e.html).
 The preset numeric values are OCN-oriented, not universal defaults.
 
-In manual mode, an empty **BR Address** lets the plugin attempt BR detection;
-**Auto-Detect BR Address** can also detect, save and reapply that value. It is
-not a replacement for correct MAP-E parameters.
+In manual mode the **BR Address**, **IPv4 Prefix (ipaddr)** and **IPv6 Prefix**
+are required; the form and Apply refuse to run without them, because the
+numeric defaults alone produce a rule that only fails inside netifd.
 
 Leave **MAP-E Interface Name** as `wan6mape` unless you need another name.
 **Reserved IPv4 Ports** excludes space-separated ports from outbound NAT; it

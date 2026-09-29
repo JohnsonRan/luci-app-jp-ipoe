@@ -761,6 +761,12 @@ DB_network_access6_proto=dhcpv6
 WAN_DEVICE=eth0
 WAN6_IFACE=access6
 MAPE_IFACE=ip4map
+DB_jp_ipoe_config_br_addr=2001:db8::1
+DB_jp_ipoe_config_ipaddr=203.0.113.0
+DB_jp_ipoe_config_ip6prefix=2001:db8::
+BR_ADDR=2001:db8::1
+IPADDR=203.0.113.0
+IP6PREFIX=2001:db8::
 `;
   // Small UCI stub scoped to the selected WAN6; no DHCP/firewall rollback model.
   const wan6Uci = `
@@ -1035,9 +1041,19 @@ exit 0
   assert.equal((log.match(/SNAT/g) || []).length, 1);
   assert.equal((log.match(/STOP/g) || []).length, 1);
 
-  run('reserved IPv4 ports: validated before setup; refresh needs a live tunnel', `
+  run('manual parameters and reserved IPv4 ports: validated before setup; refresh needs a live tunnel', `
 validate_interface_roles() { :; }; resolve_ipoe_firewall_zone() { echo wan; }
-WAN_DEVICE=eth0
+WAN_DEVICE=eth0; AUTO=0; BR_ADDR=2001:db8::1; IPADDR=203.0.113.0; IP6PREFIX=2001:db8::
+# mapcalc skips a rule without ipv6prefix/ipv4prefix; the numeric defaults
+# alone must not reach netifd as an INVALID_MAP_RULE.
+for missing in BR_ADDR IPADDR IP6PREFIX; do
+ eval "saved=\\"\\$$missing\\""; eval "$missing=''"
+ validate_config 2> "$TEST_TMP/manual-err" && fail "accepted manual mode without $missing"
+ grep -q '^ERROR: Manual mode needs' "$TEST_TMP/manual-err" || fail "missing manual error for $missing"
+ AUTO=1; validate_config || fail "auto mode rejected without $missing"; AUTO=0
+ eval "$missing=\\"$saved\\""
+done
+validate_config || fail complete-manual
 for DONT_SNAT_TO in '' 2938 '2938 7088 10233' 65535 '  2938  '; do
  validate_config || fail "rejected '$DONT_SNAT_TO'"
 done

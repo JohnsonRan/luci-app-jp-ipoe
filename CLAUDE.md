@@ -25,6 +25,7 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 ## Invariants
 
 **Config**
+- Manual mode (`auto=0`) requires `br_addr`, `ipaddr` and `ip6prefix`: mapcalc skips a rule without prefixes, so `validate_config` and the form (`rmempty=false`) both refuse before any write.
 - A new option goes in `root/etc/config/jp_ipoe`, `config.sh` and `config.js`. If setup writes something from it, also compare it in `configuration_is_current`. If it is only consumed at runtime (like `dont_snat_to` by the SNAT helper), validate it in `validate_config` and make sure the unchanged path re-applies it (`refresh_snat_reservations`), or Apply silently does nothing.
 
 **Start / stop**
