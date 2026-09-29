@@ -6,6 +6,8 @@
 # Usage:
 #   jp-ipoe-setup start   - Apply only when configuration/local readiness differs
 #   jp-ipoe-setup repair  - Force managed stop/start (interrupts traffic)
+#   jp-ipoe-setup apply | apply_repair - Detached start/repair for LuCI (poll apply_status)
+#   jp-ipoe-setup apply_status - Print the detached run log; ends with JP_IPOE_APPLY_RC=<n>
 #   jp-ipoe-setup stop    - Remove IPoE interfaces
 #   jp-ipoe-setup boot    - Run boot-time IPoE startup recovery
 #   jp-ipoe-setup status  - Print current status as JSON
@@ -19,6 +21,7 @@
 LOG_TAG="jp-ipoe"
 LOCK_DIR="/var/lock/jp-ipoe.lock.d"
 LOCK_WAIT_TIMEOUT="60"
+APPLY_LOG="/tmp/jp-ipoe-apply.log"
 PPPOE_FALLBACK_METRIC="200"
 MAPE_MTU="1460"
 JP_IPOE_INFO_HELPER="/usr/libexec/jp-ipoe-info"
@@ -27,6 +30,7 @@ WAN6_RECOVERY_WAIT_TIMEOUT="30"
 WAN6_RECOVERY_ATTEMPTS="3"
 WAN6_IPV6_POLL_INTERVAL="2"
 IFACE_DOWN_WAIT_TIMEOUT="4"
+MAPE_UP_WAIT_TIMEOUT="20"
 IFACE_STATE_POLL_INTERVAL="1"
 
 log() {
@@ -883,9 +887,31 @@ apply_dhcp_config() {
 	configure_dhcpv6_relay "$WAN6_IFACE" "$DHCPV6_RELAY"
 }
 
+# ifup only queues the bringup; the netifd handler (mapcalc, SNAT table,
+# forwards) fails asynchronously. Report its error code instead of success.
+wait_for_mape_up() {
+	local iface="$1"
+	local elapsed=0 code
+
+	while [ "$elapsed" -lt "$MAPE_UP_WAIT_TIMEOUT" ]; do
+		network_flush_cache
+		network_is_up "$iface" && return 0
+		code="$(ubus call "network.interface.$iface" status 2>/dev/null | jsonfilter -e '@.errors[0].code' 2>/dev/null)"
+		[ -z "$code" ] || {
+			log_err "MAP-E interface $iface failed: $code"
+			return 1
+		}
+		sleep "$IFACE_STATE_POLL_INTERVAL"
+		elapsed=$((elapsed + IFACE_STATE_POLL_INTERVAL))
+	done
+	log_err "MAP-E interface $iface did not come up within ${MAPE_UP_WAIT_TIMEOUT}s."
+	return 1
+}
+
 bringup_mape() {
 	log "Bringing up MAP-E interface..."
 	ifup "$MAPE_IFACE" 2>/dev/null || return 1
+	wait_for_mape_up "$MAPE_IFACE" || return 1
 
 	log "Reloading firewall..."
 	fw4 reload 2>/dev/null
@@ -933,7 +959,7 @@ run_start_pipeline() {
 	}
 
 	bringup_mape || {
-		fail_start "MAP-E bringup or firewall reload failed."
+		fail_start "MAP-E bringup failed; managed MAP-E configuration was removed."
 		return 1
 	}
 }
@@ -1108,6 +1134,34 @@ cmd_boot() {
 	cmd_start force
 }
 
+# LuCI reaches this script through rpcd file.exec: a 20s XHR timeout and a
+# SIGKILL at rpcd's exec timeout (30s by default), while a full setup can wait
+# minutes for WAN6. SIGKILL skips every trap, so LuCI must never run start or
+# repair in the foreground. Detach it and let the UI poll apply_status.
+run_detached() {
+	( "$@" </dev/null >>"$APPLY_LOG" 2>&1; echo "JP_IPOE_APPLY_RC=$?" >>"$APPLY_LOG" ) &
+}
+
+cmd_apply() {
+	local action="$1" holder
+
+	holder="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
+	if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+		log_err "Another jp-ipoe operation is already in progress (holder PID $holder); try again later."
+		return 1
+	fi
+	: > "$APPLY_LOG" || { log_err "Cannot write $APPLY_LOG."; return 1; }
+	run_detached /usr/sbin/jp-ipoe-setup "$action"
+	printf 'JP_IPOE_APPLY=%s\n' "$action"
+}
+
+# Read-only: the log of the last detached run. No JP_IPOE_APPLY_RC line means
+# it is still running (or was killed); the UI applies its own deadline.
+cmd_apply_status() {
+	[ -f "$APPLY_LOG" ] && cat "$APPLY_LOG"
+	return 0
+}
+
 # Serialize mutating operations so a LuCI apply, an SSH run, and the boot
 # service cannot race each other's uci commits and interface bring-up.
 # Read-only commands (status/detect_br, polled by LuCI) run without the lock.
@@ -1167,6 +1221,9 @@ run_locked() {
 case "$1" in
 	start)   run_locked cmd_start ;;
 	repair)  run_locked cmd_repair ;;
+	apply)   cmd_apply start ;;
+	apply_repair) cmd_apply repair ;;
+	apply_status) cmd_apply_status ;;
 	stop)    run_locked cmd_stop ;;
 	boot)    run_locked cmd_boot ;;
 	status)  cmd_status ;;
@@ -1178,7 +1235,7 @@ case "$1" in
 	forward_add6) shift; run_locked sh /usr/libexec/jp-ipoe-forward add6 "$@" ;;
 	forward_remove) shift; run_locked sh /usr/libexec/jp-ipoe-forward remove "$@" ;;
 	*)
-		echo "Usage: $0 {start|repair|stop|boot|status|detect_br|resolve|forward_list|forward_devices|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
+		echo "Usage: $0 {start|repair|apply|apply_repair|apply_status|stop|boot|status|detect_br|resolve|forward_list|forward_devices|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
 		exit 1
 		;;
 esac

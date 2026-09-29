@@ -10,7 +10,13 @@ msgid "Apply IPoE Configuration"
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:161
-msgid "Checking IPoE settings; changes may take about 30 seconds."
+msgid "Applying IPoE configuration"
+msgstr ""
+
+msgid "Waiting for the setup to finish. A full setup can take a few minutes while WAN6 acquires IPv6."
+msgstr ""
+
+msgid "Setup is still running or was interrupted; no result was reported. Check the Status tab and the system log."
 msgstr ""
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:63

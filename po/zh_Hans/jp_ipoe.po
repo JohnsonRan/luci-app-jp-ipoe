@@ -20,8 +20,14 @@ msgid "Apply IPoE Configuration"
 msgstr "应用 IPoE 配置"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:161
-msgid "Checking IPoE settings; changes may take about 30 seconds."
-msgstr "正在检查配置，应用变更可能需约 30 秒。"
+msgid "Applying IPoE configuration"
+msgstr "正在应用 IPoE 配置"
+
+msgid "Waiting for the setup to finish. A full setup can take a few minutes while WAN6 acquires IPv6."
+msgstr "正在等待配置完成。WAN6 获取 IPv6 期间，完整配置可能需要几分钟。"
+
+msgid "Setup is still running or was interrupted; no result was reported. Check the Status tab and the system log."
+msgstr "配置仍在运行或已被中断，未收到结果。请查看“状态”标签页和系统日志。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:63
 msgid "Assigned Port Ranges"

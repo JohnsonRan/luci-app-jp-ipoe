@@ -13,7 +13,12 @@
 // path and are gated by this.canWrite.
 var SETUP_SCRIPT = '/usr/sbin/jp-ipoe-setup';
 var READONLY_SCRIPT = '/usr/libexec/jp-ipoe-readonly';
-var READONLY_ACTIONS = { status: 1, detect_br: 1, resolve: 1, forward_list: 1, forward_devices: 1 };
+var READONLY_ACTIONS = { status: 1, detect_br: 1, resolve: 1, apply_status: 1, forward_list: 1, forward_devices: 1 };
+// fs.exec is bounded (20s XHR timeout, rpcd SIGKILL at its exec timeout) while
+// a full setup can wait minutes for WAN6, so start/repair run detached and
+// the UI polls apply_status for the JP_IPOE_APPLY_RC line.
+var APPLY_POLL_MS = 2000;
+var APPLY_DEADLINE_MS = 5 * 60 * 1000;
 
 var queryWriteAccess = rpc.declare({
 	object: 'session',
@@ -90,14 +95,57 @@ return view.extend({
 	runSetupAction: function(args, okMessage, failMessage) {
 		var self = this;
 		return this.execSetup(args).then(function(res) {
-			if (res.code === 0) {
-				var unchanged = args[0] === 'start' && (res.stdout || '').trim() === 'JP_IPOE_UNCHANGED=1';
-				ui.addTimeLimitedNotification(null, E('p', unchanged
-					? _('Settings unchanged and the tunnel is up; nothing was restarted. If traffic still fails, use Force Reconnect / Repair.') : okMessage), unchanged ? 10000 : 5000, 'info');
-			} else
+			if (res.code === 0)
+				ui.addTimeLimitedNotification(null, E('p', okMessage), 5000, 'info');
+			else
 				ui.addNotification(null, E('pre', {},
 					(failMessage ? failMessage + '\n' : '') + self.formatCommandOutput(res)), 'error');
 		}).catch(function(e) {
+			ui.addNotification(null, E('p', _('Error executing setup script:') + ' ' + e.message), 'error');
+		});
+	},
+
+	// Poll the detached run's log until its exit-code line or the deadline. A
+	// failed poll (e.g. transient RPC error) is retried, not reported as a
+	// setup failure: the backend keeps running regardless.
+	pollApply: function(deadline) {
+		var self = this;
+		return this.execSetup(['apply_status']).then(function(res) {
+			return res.code === 0 ? (res.stdout || '') : '';
+		}, function() { return ''; }).then(function(log) {
+			if (/^JP_IPOE_APPLY_RC=\d+$/m.test(log) || Date.now() >= deadline)
+				return log;
+			return new Promise(function(resolve) { window.setTimeout(resolve, APPLY_POLL_MS); })
+				.then(function() { return self.pollApply(deadline); });
+		});
+	},
+
+	// action is 'apply' (start) or 'apply_repair'. Blocks the page with a
+	// spinner until the detached run reports its exit code, or until the
+	// deadline, which is a warning rather than a claimed success.
+	runApply: function(action, okMessage, failMessage) {
+		var self = this;
+		ui.showModal(_('Applying IPoE configuration'), [
+			E('p', { 'class': 'spinning' }, _('Waiting for the setup to finish. A full setup can take a few minutes while WAN6 acquires IPv6.'))
+		]);
+		return this.execSetup([action]).then(function(res) {
+			if (res.code !== 0)
+				throw new Error(self.formatCommandOutput(res));
+			return self.pollApply(Date.now() + APPLY_DEADLINE_MS);
+		}).then(function(log) {
+			var rc = log.match(/^JP_IPOE_APPLY_RC=(\d+)$/m);
+			ui.hideModal();
+			if (!rc)
+				ui.addNotification(null, E('p', _('Setup is still running or was interrupted; no result was reported. Check the Status tab and the system log.')), 'warning');
+			else if (rc[1] !== '0')
+				ui.addNotification(null, E('pre', {},
+					(failMessage ? failMessage + '\n' : '') + self.formatCommandOutput({ code: rc[1], stderr: log })), 'error');
+			else if (/^JP_IPOE_UNCHANGED=1$/m.test(log))
+				ui.addTimeLimitedNotification(null, E('p', _('Settings unchanged and the tunnel is up; nothing was restarted. If traffic still fails, use Force Reconnect / Repair.')), 10000, 'info');
+			else
+				ui.addTimeLimitedNotification(null, E('p', okMessage), 5000, 'info');
+		}).catch(function(e) {
+			ui.hideModal();
 			ui.addNotification(null, E('p', _('Error executing setup script:') + ' ' + e.message), 'error');
 		});
 	},
@@ -153,7 +201,6 @@ return view.extend({
 			return;
 		if (force && !window.confirm(_('Force reconnect and repair IPoE? This runs the full setup and may interrupt IPv4 and IPv6 traffic.')))
 			return;
-		ui.addTimeLimitedNotification(null, E('p', _('Checking IPoE settings; changes may take about 30 seconds.')), 5000, 'info');
 		// Save stages session deltas. Only commit jp_ipoe, then let the CLI read it.
 		return map.save(null, true).catch(function(e) {
 			ui.addNotification(null, E('p', _('Failed to save IPoE settings; nothing was applied.') + ' ' + (e.message || e)), 'error');
@@ -164,7 +211,7 @@ return view.extend({
 				throw e;
 			});
 		}).then(function() {
-			return self.runSetupAction([force ? 'repair' : 'start'], _('IPoE configuration applied.'));
+			return self.runApply(force ? 'apply_repair' : 'apply', _('IPoE configuration applied.'));
 		}).catch(function() { /* surfaced above */ });
 	},
 
@@ -781,7 +828,7 @@ return view.extend({
 			.then(function() { return self.commitJpIpoe(); })
 			.then(function() {
 				ui.hideModal();
-				return self.runSetupAction(['start'],
+				return self.runApply('apply',
 					_('BR address saved and IPoE re-applied.'),
 					_('BR address saved, but IPoE re-apply failed.'));
 			})

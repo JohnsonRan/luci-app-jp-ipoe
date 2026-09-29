@@ -110,8 +110,8 @@ reservations, so you do not need to copy its ports into this field.
 
 | Control | When to use it |
 | --- | --- |
-| **Apply IPoE Configuration** | Save and apply settings. If settings and the locally checked running state already match, no restart is needed. Otherwise, setup runs again. |
-| **Force Reconnect / Repair** | Rebuild a connection that appears configured but does not work. **This interrupts traffic.** |
+| **Apply IPoE Configuration** | Save and apply settings. If settings and the locally checked running state already match, no restart is needed. Otherwise, setup runs again in the background (it can take a few minutes while waiting for WAN6); the page shows the result, including why the MAP-E interface failed to come up, when it finishes. |
+| **Force Reconnect / Repair** | Rebuild a connection that appears configured but does not work. **This interrupts traffic.** Runs in the background like Apply. |
 | **Stop IPoE Interfaces** | Stop the managed IPoE setup. This is not a restoration of your previous network configuration. |
 | **Status** | Inspect addresses, tunnel state, assigned ports and PPPoE fallback priority. |
 

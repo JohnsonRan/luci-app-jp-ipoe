@@ -60,6 +60,16 @@ jsonfilter() {
    if (str ~ /"up"[ \t]*:[ \t]*(false|0)/) { print "0"; exit 0 }
    exit 1
   }
+  if (pat == "@.errors[0].code") {
+   if (match(str, /"code"[ 	]*:[ 	]*"[^"]+"/)) {
+    matched = substr(str, RSTART, RLENGTH)
+    sub(/^"code"[ 	]*:[ 	]*"/, "", matched)
+    sub(/"$/, "", matched)
+    print matched
+    exit 0
+   }
+   exit 1
+  }
   if (pat == "@.data.firewall[*].name" || pat == "@.firewall[0].name") {
    count = 0
    while (match(str, /"name"[ \t]*:[ \t]*"([^"]+)"/)) {
@@ -636,6 +646,21 @@ bringup_mape && fail ignored-ifup
 ifup() { :; }
 fw4() { return 1; }
 bringup_mape && fail ignored-fw4
+# ifup is asynchronous: a netifd handler error or a silent non-up interface
+# must fail the start instead of being reported as success.
+MAPE_UP_WAIT_TIMEOUT=2; sleep() { :; }
+network_is_up() { return 1; }
+ubus() { echo '{"up":false,"errors":[{"subsystem":"map","code":"INVALID_MAP_RULE"}]}'; }
+fw4() { fail reload-after-handler-error; }
+bringup_mape 2> "$TEST_TMP/bringup-err" && fail ignored-handler-error
+grep -q '^ERROR: MAP-E interface .* failed: INVALID_MAP_RULE$' "$TEST_TMP/bringup-err" || fail missing-handler-code
+ubus() { echo '{"up":false,"pending":true}'; }
+bringup_mape 2> "$TEST_TMP/bringup-err" && fail ignored-timeout
+grep -q '^ERROR: MAP-E interface .* did not come up' "$TEST_TMP/bringup-err" || fail missing-timeout-error
+network_is_up() { UP_CHECKS=$((UP_CHECKS + 1)); [ "$UP_CHECKS" -ge 2 ]; }
+UP_CHECKS=0; fw4() { :; }
+bringup_mape || fail late-up-rejected
+fw4() { return 1; }
 uci() { return 0; }
 odhcpd_mock() { return 1; }
 configure_dhcpv6_relay access6 1 && fail ignored-odhcpd
@@ -1002,6 +1027,33 @@ exit 0
   assert.equal((log.match(/COMMIT/g) || []).length, 3);
   assert.equal((log.match(/STOP/g) || []).length, 1);
 
+  // LuCI reaches the script through rpcd file.exec (SIGKILL at its exec
+  // timeout, 20s XHR timeout) and a full setup waits minutes for WAN6, so
+  // start/repair must run detached with the result readable afterwards.
+  run('detached apply: background result marker, live-lock refusal and read-only status', `
+APPLY_LOG="$TEST_TMP/apply.log"; LOCK_DIR="$TEST_TMP/apply-lock"
+run_detached sh -c 'echo ERROR: worker failed >&2; exit 3'
+wait
+grep -Fxq 'ERROR: worker failed' "$APPLY_LOG" || fail missing-worker-output
+grep -Fxq 'JP_IPOE_APPLY_RC=3' "$APPLY_LOG" || fail missing-exit-code
+run_detached() { printf 'DETACHED %s\\n' "$*" >> "$TEST_TMP/detach-log"; }
+[ "$(cmd_apply start)" = 'JP_IPOE_APPLY=start' ] || fail apply-marker
+[ -z "$(cat "$APPLY_LOG")" ] || fail stale-log-not-cleared
+grep -Fxq 'DETACHED /usr/sbin/jp-ipoe-setup start' "$TEST_TMP/detach-log" || fail wrong-detached-command
+cmd_apply repair >/dev/null || fail apply-repair
+grep -Fxq 'DETACHED /usr/sbin/jp-ipoe-setup repair' "$TEST_TMP/detach-log" || fail wrong-repair-command
+mkdir -p "$LOCK_DIR"; echo $$ > "$LOCK_DIR/pid"
+cmd_apply start 2> "$TEST_TMP/apply-err" && fail ignored-live-lock
+grep -q '^ERROR: Another jp-ipoe operation' "$TEST_TMP/apply-err" || fail missing-lock-error
+[ "$(grep -c DETACHED "$TEST_TMP/detach-log")" = 2 ] || fail detached-despite-lock
+echo 999999 > "$LOCK_DIR/pid"
+cmd_apply start >/dev/null || fail stale-lock-blocks-apply
+printf 'line\\nJP_IPOE_APPLY_RC=0\\n' > "$APPLY_LOG"
+[ "$(cmd_apply_status)" = "$(printf 'line\\nJP_IPOE_APPLY_RC=0')" ] || fail status-output
+rm -f "$APPLY_LOG"
+[ -z "$(cmd_apply_status)" ] || fail status-without-log
+`, setup);
+
   const locked = run('locked operations attempt PPPoE restoration after both success and failure', `
 LOCK_DIR="$TEST_TMP/setup-lock"
 restore_stopped_pppoe_fallback() { echo RESTORE; }
@@ -1300,7 +1352,7 @@ done
         notifications++; messages.push(node.children ?? node.attrs);
       },
       addTimeLimitedNotification: (title, node, timeout, style) => {
-        assert.equal(timeout, 5000);
+        assert([5000, 10000].includes(timeout), 'transient notices use the known durations');
         assert.equal(style, 'info');
         notifications++; messages.push(node.children ?? node.attrs);
       },
@@ -1308,7 +1360,7 @@ done
     (tag, attrs, children) => ({ tag, attrs, children }), text => text,
     { exec: (...args) => executeCommand(...args) },
     { getElementById: id => elements[id] },
-    rpcMock, uciMock, { confirm: () => true }
+    rpcMock, uciMock, { confirm: () => true, setTimeout: (fn) => fn() }
   );
   view.forwardBusy = true;
   view.confirmForward([]);
@@ -1496,12 +1548,12 @@ done
   const wrappedScript = read('root/usr/libexec/jp-ipoe-readonly').replaceAll('/usr/sbin/jp-ipoe-setup', fakeSetup);
   const runWrapper = (args) => cp.spawnSync('sh', ['-c', wrappedScript, 'jp-ipoe-readonly'].concat(args),
     { cwd: root, encoding: 'utf8' });
-  for (const args of [['status'], ['detect_br'], ['resolve'], ['forward_list'], ['forward_devices']]) {
+  for (const args of [['status'], ['detect_br'], ['resolve'], ['apply_status'], ['forward_list'], ['forward_devices']]) {
     const r = runWrapper(args);
     assert.equal(r.status, 0, 'wrapper must allow ' + args.join(' ') + '\n' + r.stderr);
     assert.equal(r.stdout.trim(), 'RAN: ' + args[0]);
   }
-  for (const args of [['start'], ['stop'], ['repair'], ['boot'],
+  for (const args of [['start'], ['stop'], ['repair'], ['boot'], ['apply'], ['apply_repair'],
     ['forward_add', 'tcp', '192.168.1.10', '80', ''],
     ['forward_add6', 'tcp', '2001:db8::10', '22'],
     ['forward_remove', 'saved'], ['status', 'extra'], [], ['status;reboot']]) {
@@ -1549,18 +1601,28 @@ done
   messages.length = 0;
 
   // Drive the actual production Apply/Repair methods, not a reconstructed chain.
+  // Old behavior: start/repair ran in the foreground of one fs.exec and were
+  // SIGKILLed by rpcd after its exec timeout. New: the writable path only
+  // detaches; the result comes from polling apply_status through the wrapper.
   view.canWrite = true;
   const orderedOps = [];
   let failedStep = '';
+  let applyLog = 'log line\nJP_IPOE_APPLY_RC=0\n';
   const formMap = { save: (callback, silent) => {
     assert.equal(callback, null); assert.equal(silent, true);
     orderedOps.push('save');
     return failedStep === 'save' ? Promise.reject(new Error('save failure')) : Promise.resolve();
   } };
   executeCommand = (file, args) => {
+    if (args[0] === 'apply_status') {
+      assert.equal(file, '/usr/libexec/jp-ipoe-readonly');
+      orderedOps.push('poll');
+      return Promise.resolve({ code: 0, stdout: applyLog, stderr: '' });
+    }
     assert.equal(file, '/usr/sbin/jp-ipoe-setup');
+    assert.equal(args.length, 1, 'detached apply takes no arguments');
     orderedOps.push('exec:' + args[0]);
-    return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+    return Promise.resolve({ code: 0, stdout: 'JP_IPOE_APPLY=' + args[0], stderr: '' });
   };
   rpcMock.declare = (spec) => (...args) => {
     assert.equal(spec.object, 'uci'); assert.equal(spec.method, 'commit');
@@ -1575,10 +1637,56 @@ done
       await view.applyIPoE(formMap, force);
       const expected = ['save'];
       if (failedStep !== 'save') expected.push('commit:jp_ipoe');
-      if (!failedStep) expected.push('exec:' + (force ? 'repair' : 'start'));
+      if (!failedStep) expected.push('exec:' + (force ? 'apply_repair' : 'apply'), 'poll');
       assert.deepEqual(orderedOps, expected, 'failed save/commit must stop the actual apply chain');
     }
   }
+  // Polling continues until the detached run reports an exit code; failures
+  // surface the backend ERROR: lines, unchanged runs say so, and a missing
+  // result after the deadline is a warning rather than a claimed success.
+  failedStep = '';
+  const applyLogs = ['starting\n', 'starting\nwaiting\n', 'starting\nERROR: WAN6 has no IPv6\nJP_IPOE_APPLY_RC=1\n'];
+  executeCommand = (file, args) => {
+    if (args[0] === 'apply_status') {
+      orderedOps.push('poll');
+      return Promise.resolve({ code: 0, stdout: applyLogs.shift(), stderr: '' });
+    }
+    orderedOps.push('exec:' + args[0]);
+    return Promise.resolve({ code: 0, stdout: 'JP_IPOE_APPLY=start', stderr: '' });
+  };
+  orderedOps.length = 0; messages.length = 0;
+  await view.applyIPoE(formMap, false);
+  assert.deepEqual(orderedOps, ['save', 'commit:jp_ipoe', 'exec:apply', 'poll', 'poll', 'poll']);
+  assert(messages.some(m => /ERROR: WAN6 has no IPv6/.test(m)), 'detached failure must surface ERROR: lines');
+  assert(!messages.some(m => /IPoE configuration applied/.test(m)), 'a failed detached run is not a success');
+  applyLogs.push('JP_IPOE_UNCHANGED=1\nJP_IPOE_APPLY_RC=0\n');
+  messages.length = 0;
+  await view.applyIPoE(formMap, false);
+  assert(messages.some(m => /Settings unchanged and the tunnel is up/.test(m)));
+  const realNow = Date.now;
+  Date.now = () => Infinity;
+  applyLogs.push('starting\n');
+  messages.length = 0;
+  await view.applyIPoE(formMap, false);
+  Date.now = realNow;
+  assert(messages.some(m => /still running or was interrupted/.test(m)), 'no result by the deadline must not claim success');
+  assert(!messages.some(m => /IPoE configuration applied/.test(m)));
+  messages.length = 0;
+  executeCommand = (file, args) => {
+    orderedOps.push(args[0] === 'apply_status' ? 'poll' : 'exec:' + args[0]);
+    return args[0] === 'apply_status'
+      ? Promise.resolve({ code: 0, stdout: applyLogs.shift(), stderr: '' })
+      : Promise.resolve({ code: 1, stdout: '', stderr: 'ERROR: Another jp-ipoe operation is already in progress' });
+  };
+  orderedOps.length = 0;
+  await view.applyIPoE(formMap, false);
+  assert.deepEqual(orderedOps, ['save', 'commit:jp_ipoe', 'exec:apply'], 'a refused detach must not poll');
+  assert(messages.some(m => /Another jp-ipoe operation is already in progress/.test(m)));
+  executeCommand = (file, args) => {
+    if (args[0] === 'apply_status') { orderedOps.push('poll'); return Promise.resolve({ code: 0, stdout: applyLog, stderr: '' }); }
+    orderedOps.push('exec:' + args[0]);
+    return Promise.resolve({ code: 0, stdout: 'JP_IPOE_APPLY=' + args[0], stderr: '' });
+  };
   uciMock.set = (conf, section, key, value) => {
     assert.deepEqual([conf, section, key, value], ['jp_ipoe', 'config', 'br_addr', '2001:db8::1']);
     orderedOps.push('set:jp_ipoe');
@@ -1589,7 +1697,7 @@ done
     await view.saveAndApplyBR('2001:db8::1');
     const expected = ['set:jp_ipoe', 'save'];
     if (failedStep !== 'save') expected.push('commit:jp_ipoe');
-    if (!failedStep) expected.push('exec:start');
+    if (!failedStep) expected.push('exec:apply', 'poll');
     assert.deepEqual(orderedOps, expected);
   }
   view.canWrite = false;

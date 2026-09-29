@@ -91,7 +91,22 @@ dependency; polling remains confined to the visible Status tab.
 ### Apply, repair and boot
 
 LuCI saves form changes to its rpcd session delta, explicitly commits only
-`jp_ipoe`, then invokes setup. Save/commit failure blocks execution. BR save uses
+`jp_ipoe`, then invokes setup. Save/commit failure blocks execution.
+
+Setup is not run in the foreground of the LuCI request. `fs.exec` goes through
+rpcd `file.exec`, which SIGKILLs the command at its exec timeout (`option
+timeout 30` in the stock `/etc/config/rpcd`), and LuCI's XHR gives up after
+20s, while a full setup legitimately waits minutes for WAN6 (initial wait plus
+PPPoE-conflict recovery rounds). SIGKILL bypasses every trap, so a foreground
+run would leave a stopped PPPoE fallback down and partial configuration behind.
+LuCI therefore calls `apply` (start) or `apply_repair`, which refuse while a
+live lock holder exists, truncate `/tmp/jp-ipoe-apply.log`, detach the real
+command with its output appended to that log, and return immediately. The
+read-only `apply_status` prints the log; the run ends with a
+`JP_IPOE_APPLY_RC=<code>` line. The UI polls every 2s up to 5 minutes, then
+reports the `ERROR:` lines, the unchanged marker, success, or (no marker) a
+warning that no result was reported. `start`, `repair`, `stop` and `boot`
+remain synchronous for SSH and the init script. BR save uses
 the same targeted commit; do not use global `uci.apply()` to apply unrelated
 pending packages. Read ACL permits only the strict `jp-ipoe-readonly` wrapper;
 write ACL permits the setup path and targeted UCI commit. Mutation handlers also
@@ -119,7 +134,12 @@ tear MAP-E down behind the explicit Apply run.
 The full pipeline validates configuration and the installed MAP handler,
 configures WAN6 and its DUID, waits for IPv6, resolves automatic parameters if
 enabled, creates MAP-E, updates the WAN zone and LAN IPv6 mode, then brings up
-the tunnel. MAP-E MTU is `1460`; PPPoE fallback metric is `200`. A failed apply
+the tunnel. `ifup` only queues the bringup, so `bringup_mape` waits up to
+`MAPE_UP_WAIT_TIMEOUT` (20s) for the interface to report up; a netifd handler
+error (`errors[0].code`, such as `INVALID_MAP_RULE`, `NO_MATCHING_PD` or
+`INVALID_PORTSETS`) or the timeout fails the start with an `ERROR:` line and
+takes the same managed rollback as any other bringup failure. MAP-E MTU is
+`1460`; PPPoE fallback metric is `200`. A failed apply
 after network changes attempts to tear down managed MAP-E state; it is not a full
 restore of the user's previous configuration. Required UCI writes, commits,
 ifup, odhcpd restart and fw4 reload failures must not be hidden by later logs.
