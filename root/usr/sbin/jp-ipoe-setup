@@ -9,6 +9,7 @@
 #   jp-ipoe-setup apply | apply_repair - Detached start/repair for LuCI (poll apply_status)
 #   jp-ipoe-setup apply_status - Print the detached run log; ends with JP_IPOE_APPLY_RC=<n>
 #   jp-ipoe-setup stop    - Remove IPoE interfaces
+#   jp-ipoe-setup uninstall - Package-only stop, wait for teardown and restore handler
 #   jp-ipoe-setup boot    - Run boot-time IPoE startup recovery
 #   jp-ipoe-setup status  - Print current status as JSON
 #
@@ -30,6 +31,7 @@ WAN6_RECOVERY_ATTEMPTS="3"
 WAN6_IPV6_POLL_INTERVAL="2"
 IFACE_DOWN_WAIT_TIMEOUT="4"
 MAPE_UP_WAIT_TIMEOUT="20"
+UNINSTALL_WAIT_TIMEOUT="30"
 IFACE_STATE_POLL_INTERVAL="1"
 
 log() {
@@ -1092,6 +1094,72 @@ cmd_stop() {
 	log "Done."
 }
 
+# Return 0 for present, 1 for absent, 2 for unknown. A failed/malformed dump
+# is never proof of removal. netifd retains removed interfaces until IFPEV_DOWN
+# (interfaces.no_delete), unlike status.up which is false during IFS_TEARDOWN.
+mape_runtime_present() {
+	local data state
+	data="$(ubus call network.interface dump 2>/dev/null)" || return 2
+	state="$(ucode -e '
+		let data;
+		try { data = json(ARGV[0]); } catch (e) { exit(1); }
+		if (type(data) != "object" || type(data.interface) != "array" ||
+		    length(filter(data.interface, i => type(i) != "object" || type(i.interface) != "string")))
+			exit(1);
+		print(length(filter(data.interface, i => i.interface == ARGV[1])) ? "present" : "absent");
+	' "$data" "$MAPE_IFACE" 2>/dev/null)" || return 2
+	case "$state" in
+		present) return 0 ;;
+		absent) return 1 ;;
+		*) return 2 ;;
+	esac
+}
+
+wait_for_mape_removal() {
+	local elapsed=0 state
+	while :; do
+		mape_runtime_present; state=$?
+		case "$state" in
+			1) return 0 ;;
+			0) ;;
+			*) log_err "Cannot verify netifd MAP-E removal before uninstall."; return 1 ;;
+		esac
+		if [ "$elapsed" = 0 ]; then
+			ubus call "network.interface.$MAPE_IFACE" remove >/dev/null 2>&1 || {
+				log_err "Cannot request netifd removal of $MAPE_IFACE before uninstall."
+				return 1
+			}
+		fi
+		[ "$elapsed" -lt "$UNINSTALL_WAIT_TIMEOUT" ] || {
+			log_err "MAP-E teardown did not finish within ${UNINSTALL_WAIT_TIMEOUT}s; uninstall may leave partial runtime state."
+			return 1
+		}
+		sleep "$IFACE_STATE_POLL_INTERVAL"
+		elapsed=$((elapsed + IFACE_STATE_POLL_INTERVAL))
+	done
+}
+
+# Only package removal uses this stronger barrier. Leave normal stop/boot
+# unchanged. Hold the mutation lock through successful handler restoration.
+cmd_uninstall() {
+	local rc=0 tables
+	cmd_stop || return 1
+	wait_for_mape_removal || rc=1
+	# Also clean a stale table if the handler failed or teardown timed out.
+	# The helper's absent-table error is harmless only after a readable nft dump.
+	sh /usr/libexec/jp-ipoe-map-nft teardown "$MAPE_IFACE" >/dev/null 2>&1
+	tables="$(nft list tables 2>/dev/null)" || {
+		log_err "Cannot verify SNAT table removal before uninstall."
+		return 1
+	}
+	if printf '%s\n' "$tables" | grep -Fxq "table inet jpipoe_$MAPE_IFACE"; then
+		log_err "SNAT table jpipoe_$MAPE_IFACE remains after uninstall cleanup."
+		rc=1
+	fi
+	sh /usr/libexec/jp-ipoe-install-map restore || rc=1
+	return "$rc"
+}
+
 # Explicit recovery uses the existing stop/start path, even if UCI is unchanged.
 cmd_repair() {
 	cmd_stop || return 1
@@ -1209,6 +1277,7 @@ case "$1" in
 	apply_repair) cmd_apply repair ;;
 	apply_status) cmd_apply_status ;;
 	stop)    run_locked cmd_stop ;;
+	uninstall) run_locked cmd_uninstall ;;
 	boot)    run_locked cmd_boot ;;
 	status)  cmd_status ;;
 	resolve) cmd_resolve ;;
@@ -1217,7 +1286,7 @@ case "$1" in
 	forward_add6) shift; run_locked sh /usr/libexec/jp-ipoe-forward add6 "$@" ;;
 	forward_remove) shift; run_locked sh /usr/libexec/jp-ipoe-forward remove "$@" ;;
 	*)
-		echo "Usage: $0 {start|repair|apply|apply_repair|apply_status|stop|boot|status|resolve|forward_list|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
+		echo "Usage: $0 {start|repair|apply|apply_repair|apply_status|stop|uninstall|boot|status|resolve|forward_list|forward_add <tcp|udp|tcpudp> <lan-ip> <lan-port> [external-port]|forward_add6 <tcp|udp|tcpudp> <lan-ipv6> <service-port>|forward_remove <id>}"
 		exit 1
 		;;
 esac

@@ -45,12 +45,22 @@ unconditional stop hook before replacing files. Expect disruption and manually
 Apply again if Enable at Boot is off. Ordinary stop and boot behavior are
 unchanged. OpenWrt 25.12 apk uses separate upgrade hooks (no pre-deinstall on upgrade).
 
-On live uninstall, `prerm` explicitly stops the service before restoring the
-saved stock handler, so netifd teardown can still use the patched handler and
-SNAT helper. This precedes opkg's default service stop; on 25.12 apk the default
-stop runs first, so the explicit stop must remain idempotent. Image-root hooks
-never stop the host's service. A stop failure is reported, but handler restoration
-still runs because apk can purge helpers even after a failing hook.
+On live uninstall, `prerm` invokes `jp-ipoe-setup uninstall` directly: the procd
+`rc.common` stop wrapper does not propagate `stop_service` failure. The package-only
+action holds the setup lock, runs guarded stop, requests removal of the netifd MAP
+object, then waits up to 30s for its absence from a valid interface dump. netifd
+retains that object until protocol teardown completes; `up=false` also describes
+an in-progress teardown and is not sufficient. After waiting, the action explicitly
+cleans the owned SNAT table and verifies its absence with a readable nft dump before
+restoring the handler. Ordinary stop and the required boot sequence are unchanged.
+
+This precedes opkg's default service stop; on 25.12 apk default stop runs first,
+so the package-only action also handles already-stopped or absent interfaces.
+Timeouts/unknown state trigger best-effort SNAT cleanup and a nonzero result with
+an `ERROR:` diagnostic, not a success claim. The outer hook still restores/withdraws
+the owned handler after any failure (including lock/ownership refusal), because
+apk can purge helpers despite a failing hook. Such failure requires manual review
+of partial network/firewall state. Image-root hooks never touch host services.
 `prerm` skips opkg upgrades (apk uses separate upgrade hooks). It leaves
 foreign handlers and their backups untouched. Restoration prepares a same-directory
 temporary file before rename. If restoration fails, it preserves the backup and

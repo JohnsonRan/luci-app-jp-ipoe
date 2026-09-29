@@ -31,15 +31,16 @@ INSTALLER="$${IPKG_INSTROOT:-}/usr/libexec/jp-ipoe-install-map"
 [ -f "$$INSTALLER" ] || exit 0
 rc=0
 if [ -z "$$IPKG_INSTROOT" ]; then
-	# Teardown must still use our handler and SNAT helper. opkg runs this
-	# hook before default_prerm's service stop; apk may already have stopped it.
-	/etc/init.d/jp_ipoe stop || {
-		echo "ERROR: Failed to stop JP IPoE before uninstall; check network/firewall state." >&2
-		rc=1
-	}
+	# Call setup directly: rc.common can mask stop_service failures. The
+	# locked uninstall action waits for netifd removal and checks SNAT cleanup
+	# before restoring the handler. apk may already have called service stop.
+	/usr/sbin/jp-ipoe-setup uninstall && exit 0
+	echo "ERROR: JP IPoE uninstall cleanup failed; partial network/firewall state may remain." >&2
+	rc=1
 fi
-# Even after a stop failure, withdraw the helper-dependent handler: apk can
-# purge package files despite a failing pre-deinstall hook.
+# Also restore after lock/ownership/inspection failure, or in an image root.
+# apk can purge helpers despite a failing hook; never leave an owned handler
+# pointing at removed helpers.
 sh "$$INSTALLER" restore || rc=1
 exit "$$rc"
 endef

@@ -943,6 +943,7 @@ for iface in access6 ip4map; do
  DB_firewall_wan_network="wan $iface"
  DB_firewall_uplink_network="access6 $iface"
  cmd_stop && fail ambiguous-stop
+ cmd_uninstall && fail ambiguous-uninstall
  cmd_repair && fail ambiguous-repair
  cmd_boot && fail ambiguous-boot
 done
@@ -1336,24 +1337,106 @@ start() { start_service "$@"; }
 
   fs.writeFileSync(path.join(tmp, 'postinst.sh'), postinst, { mode: 0o755 });
   fs.writeFileSync(path.join(tmp, 'prerm.sh'), prerm, { mode: 0o755 });
-  // Redirect only absolute device paths, leaving the actual hook control flow.
+  // Real uninstall action and hook, redirecting only device paths. The dump
+  // remains up=false while teardown is delayed, as netifd's IFS_TEARDOWN does.
   const livePrerm = prerm
-    .replace('/etc/init.d/jp_ipoe', 'service_mock')
+    .replace('/usr/sbin/jp-ipoe-setup', 'setup_hook')
     .replace('${IPKG_INSTROOT:-}/usr/libexec/jp-ipoe-install-map', tmp + '/restore-mock');
   fs.writeFileSync(tmp + '/restore-mock', '#!/bin/sh\necho restore >> "$TEST_TMP/remove-order"\nexit "${RESTORE_RC:-0}"\n');
-  run('live prerm: stop before restore, retain restoration on failure, skip upgrades/image host stop', `
-service_mock() { echo stop >> "$TEST_TMP/remove-order"; return "$STOP_RC"; }
-for STOP_RC in 0 1; do
- for RESTORE_RC in 0 1; do
-  export RESTORE_RC
-  : > "$TEST_TMP/remove-order"
-  ( ${livePrerm} ); rc=$?
-  expected=0; [ "$STOP_RC$RESTORE_RC" = 00 ] || expected=1
-  [ "$rc" = "$expected" ] || fail ignored-hook-failure
-  [ "$(tr '\\n' ' ' < "$TEST_TMP/remove-order")" = 'stop restore ' ] || fail teardown-order
- done
+  const uninstallSetup = setup
+    .replace('sh /usr/libexec/jp-ipoe-map-nft', 'snat_cleanup_mock')
+    .replaceAll('sh /usr/libexec/jp-ipoe-install-map', 'restore_mock');
+  const initForUninstall = read('root/etc/init.d/jp_ipoe').replaceAll('/usr/sbin/jp-ipoe-setup', 'setup_hook');
+  run('live prerm: async teardown barrier, masked init errors, SNAT proof, fallback restoration and isolation', `
+LOCK_DIR="$TEST_TMP/uninstall-lock"; LOCK_WAIT_TIMEOUT=0; UNINSTALL_WAIT_TIMEOUT=2
+cmd_stop() { echo stop >> "$TEST_TMP/remove-order"; MAPE_IFACE=ip4map; return "$STOP_RC"; }
+setup_hook() { case "$1" in stop) cmd_stop;; uninstall) run_locked cmd_uninstall;; *) fail wrong-action;; esac; }
+# OpenWrt 24.10/25.12 rc.common procd stop semantics: later commands mask the
+# stop_service exit. Keep the real init stop_service above, not a return-code proxy.
+procd_lock() { :; }; procd_kill() { :; }
+rc_common_stop() {
+ procd_lock
+ stop_service "$@"
+ procd_kill "$(basename \${basescript:-$initscript})" "$1"
+ if eval "type service_stopped" 2>/dev/null >/dev/null; then
+  service_stopped
+ fi
+}
+ubus() {
+ case "$*" in
+  'call network.interface dump') [ "$DUMP_FAIL" = 0 ] || return 1; command cat "$TEST_TMP/remove-dump";;
+  'call network.interface.ip4map remove') echo remove >> "$TEST_TMP/remove-order"; [ "$REMOVE_FAIL" = 0 ];;
+  *) fail "unexpected ubus $*";;
+ esac
+}
+sleep() {
+ TICKS=$((TICKS + 1)); echo tick >> "$TEST_TMP/remove-order"
+ if [ "$STUCK" = 0 ] && [ "$TICKS" = 2 ]; then
+  echo teardown >> "$TEST_TMP/remove-order"
+  echo '{"interface":[]}' > "$TEST_TMP/remove-dump"
+ fi
+}
+snat_cleanup_mock() {
+ [ "$*" = 'teardown ip4map' ] || fail wrong-table
+ echo cleanup >> "$TEST_TMP/remove-order"
+ [ "$CLEAN_FAIL" = 0 ] || return 1
+ echo 'table inet jpipoe_foreign' > "$TEST_TMP/remove-tables"
+}
+nft() {
+ [ "$*" = 'list tables' ] || fail unexpected-nft
+ [ "$NFT_FAIL" = 0 ] || return 1
+ command cat "$TEST_TMP/remove-tables"
+}
+restore_mock() {
+ [ -f "$LOCK_DIR/pid" ] || fail unlocked-restore
+ sh "$TEST_TMP/restore-mock" "$@"
+}
+for scenario in delayed absent stop_fail timeout bad_dump dump_fail parser_fail remove_fail cleanup_fail nft_fail restore_fail lock_fail; do
+ STOP_RC=0; STUCK=0; DUMP_FAIL=0; REMOVE_FAIL=0; CLEAN_FAIL=0; NFT_FAIL=0; RESTORE_RC=0; TICKS=0; MOCK_JSON_FAIL=''
+ initscript=/etc/init.d/jp_ipoe
+ export RESTORE_RC
+ : > "$TEST_TMP/remove-order"
+ echo '{"interface":[{"interface":"ip4map","up":false}]}' > "$TEST_TMP/remove-dump"
+ printf '%s\\n' 'table inet jpipoe_ip4map' 'table inet jpipoe_foreign' > "$TEST_TMP/remove-tables"
+ case "$scenario" in
+  absent) echo '{"interface":[]}' > "$TEST_TMP/remove-dump";;
+  stop_fail) STOP_RC=42
+   rc_common_stop; [ "$?" = 0 ] || fail expected-rc-common-masking
+   : > "$TEST_TMP/remove-order";;
+  timeout) STUCK=1;;
+  bad_dump) echo '{}' > "$TEST_TMP/remove-dump";;
+  dump_fail) DUMP_FAIL=1;;
+  parser_fail) MOCK_JSON_FAIL=1;;
+  remove_fail) REMOVE_FAIL=1;;
+  cleanup_fail) CLEAN_FAIL=1;;
+  nft_fail) NFT_FAIL=1;;
+  restore_fail) RESTORE_RC=1;;
+  lock_fail) mkdir "$LOCK_DIR"; echo $$ > "$LOCK_DIR/pid";;
+ esac
+ ( ${livePrerm} ) 2> "$TEST_TMP/remove-error"; rc=$?
+ order="$(tr '\\n' ' ' < "$TEST_TMP/remove-order")"
+ case "$scenario" in
+  delayed) [ "$rc" = 0 ] && [ "$order" = 'stop remove tick tick teardown cleanup restore ' ] || fail "async rc=$rc order=$order: $(command cat "$TEST_TMP/remove-error")";;
+  absent) [ "$rc" = 0 ] && [ "$order" = 'stop cleanup restore ' ] || fail "absent order $order";;
+  *) [ "$rc" != 0 ] || fail "ignored $scenario"
+   grep -q '^ERROR: JP IPoE uninstall cleanup failed; partial' "$TEST_TMP/remove-error" || fail missing-partial-error
+   grep -q '^restore$' "$TEST_TMP/remove-order" || fail "no fallback restore $scenario";;
+ esac
+ case "$scenario" in
+  stop_fail|lock_fail) grep -Eq '^(remove|cleanup)$' "$TEST_TMP/remove-order" && fail cleanup-without-guarded-stop;;
+  *) grep -q '^cleanup$' "$TEST_TMP/remove-order" || fail missing-best-effort-cleanup;;
+ esac
+ if [ "$scenario" = timeout ]; then
+  [ "$order" = 'stop remove tick tick cleanup restore restore ' ] || fail timeout-order
+  grep -q '^ERROR: MAP-E teardown did not finish' "$TEST_TMP/remove-error" || fail timeout-not-reported
+ fi
+ if [ "$scenario" != cleanup_fail ] && [ "$scenario" != stop_fail ] && [ "$scenario" != lock_fail ]; then
+  grep -q '^table inet jpipoe_ip4map$' "$TEST_TMP/remove-tables" && fail stale-owned-table
+ fi
+ grep -q '^table inet jpipoe_foreign$' "$TEST_TMP/remove-tables" || fail foreign-table-changed
+ if [ "$scenario" = lock_fail ]; then rm -rf "$LOCK_DIR"; else [ ! -d "$LOCK_DIR" ] || fail leaked-lock; fi
 done
-STOP_RC=0; RESTORE_RC=0
+RESTORE_RC=0
 for mode in upgrade_env upgrade_arg image; do
  : > "$TEST_TMP/remove-order"
  (
@@ -1370,7 +1453,7 @@ for mode in upgrade_env upgrade_arg image; do
   [ ! -s "$TEST_TMP/remove-order" ] || fail upgrade-mutated
  fi
 done
-`);
+`, uninstallSetup + '\n' + initForUninstall);
 
   run('package hooks: install creates backup, upgrade preserves state, failure propagates', `
 MDIR="$TEST_TMP/pkg_test1"
@@ -1728,7 +1811,7 @@ done
     assert.equal(r.status, 0, 'wrapper must allow ' + args.join(' ') + '\n' + r.stderr);
     assert.equal(r.stdout.trim(), 'RAN: ' + args[0]);
   }
-  for (const args of [['detect_br'], ['forward_devices'], ['start'], ['stop'], ['repair'], ['boot'], ['apply'], ['apply_repair'],
+  for (const args of [['detect_br'], ['forward_devices'], ['start'], ['stop'], ['uninstall'], ['repair'], ['boot'], ['apply'], ['apply_repair'],
     ['forward_add', 'tcp', '192.168.1.10', '80', ''],
     ['forward_add6', 'tcp', '2001:db8::10', '22'],
     ['forward_remove', 'saved'], ['status', 'extra'], [], ['status;reboot']]) {
