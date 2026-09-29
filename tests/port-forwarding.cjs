@@ -1289,6 +1289,35 @@ jp_forward6_installed jp_ipoe6_saved; [ "$?" = 2 ] || fail unknown
     const r = cp.spawnSync('sh', ['-n', p], { cwd: root, encoding: 'utf8' });
     assert.equal(r.status, 0, p + '\n' + r.stderr);
   }
+  run('init lifecycle: upgrade preserves manual MAP-E; ordinary stop and boot still execute', `
+for DB_jp_ipoe_config_enabled in 0 1; do
+ PKG_UPGRADE=1; CALLS=''
+ stop_service || fail upgrade-stop
+ [ -z "$CALLS" ] || fail upgrade-tore-down-config
+ start_service || fail upgrade-start
+ if [ "$DB_jp_ipoe_config_enabled" = 1 ]; then
+  [ "$CALLS" = 'start' ] || fail enabled-upgrade-did-not-start
+ else
+  [ -z "$CALLS" ] || fail disabled-upgrade-started
+ fi
+ PKG_UPGRADE=''; CALLS=''
+ stop_service || fail ordinary-stop
+ [ "$CALLS" = stop ] || fail ordinary-stop-skipped
+ CALLS=''
+ boot || fail boot
+ if [ "$DB_jp_ipoe_config_enabled" = 1 ]; then
+  [ "$CALLS" = boot ] || fail boot-action-changed
+ else
+  [ -z "$CALLS" ] || fail disabled-boot-started
+ fi
+done
+`, read('root/etc/init.d/jp_ipoe').replaceAll('/usr/sbin/jp-ipoe-setup', 'setup_mock') + `
+setup_mock() { CALLS="$*"; }
+procd_open_instance() { :; }; procd_close_instance() { :; }
+procd_set_param() { [ "$1" != command ] || CALLS="$3"; return 0; }
+start() { start_service "$@"; }
+`);
+
   const makefile = read('Makefile');
   assert.equal((makefile.match(/^include .*\/luci\.mk$/gm) || []).length, 1);
   assert.doesNotMatch(makefile, /\$\(\s*call\s+BuildPackage[, ]/);

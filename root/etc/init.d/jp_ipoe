@@ -25,6 +25,9 @@ boot() {
 }
 
 stop_service() {
+	# opkg default_prerm stops init scripts even during upgrades. Preserve
+	# manually applied MAP-E when Enable at Boot is off (postinst won't start it).
+	[ "$PKG_UPGRADE" != "1" ] || return 0
 	/usr/sbin/jp-ipoe-setup stop
 }
 

@@ -36,7 +36,13 @@ hooks. Keep the literal `# call BuildPackage - OpenWrt buildroot signature`
 comment so OpenWrt's package scanner discovers the package.
 
 `postinst` installs the bundled MAP handler and refreshes LuCI/rpcd state on a
-live upgrade. `prerm` restores the saved stock handler before package helpers
+live upgrade. The init script skips its setup teardown when `PKG_UPGRADE=1`:
+opkg's default removal hook still calls service stop during upgrades, but
+`enabled=0` users may have manually applied MAP-E and postinst will not restart
+it. Ordinary stop and boot behavior are unchanged. OpenWrt 25.12 apk uses
+separate upgrade hooks (no pre-deinstall on upgrade).
+
+`prerm` restores the saved stock handler before package helpers
 are removed, skipping opkg upgrades (apk uses separate upgrade hooks). It leaves
 foreign handlers and their backups untouched. Restoration prepares a same-directory
 temporary file before rename. If restoration fails, it preserves the backup and
