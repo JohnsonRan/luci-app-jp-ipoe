@@ -321,8 +321,8 @@ msgid "Setup script exited with code:"
 msgstr "配置脚本退出代码："
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:147
-msgid "Exclude these IPv4 ports from MAP-E SNAT (space-separated). Leave empty unless reserving inbound ports."
-msgstr "这些 IPv4 端口不用于 MAP-E SNAT，以空格分隔。无需手动预留入站端口时留空。"
+msgid "Exclude these IPv4 ports from MAP-E SNAT (single ports, space-separated, no ranges). Applied to the running tunnel on Apply without a restart. Leave empty unless reserving inbound ports."
+msgstr "这些 IPv4 端口不用于 MAP-E SNAT（单个端口，以空格分隔，不支持范围）。点击应用后直接作用于运行中的隧道，无需重启。无需手动预留入站端口时留空。"
 
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:213
 msgid "Status"

@@ -122,10 +122,18 @@ prefix, and the `jpipoe_<iface>` SNAT table exists. It does not rely on a saved
 success fingerprint, and it does not audit runtime details (SNAT rule contents,
 routes, forwarding redirects): that drift is what Repair is for.
 
-If all checks match, only plugin settings are committed and stdout is
-`JP_IPOE_UNCHANGED=1`. Network/firewall/DHCP configuration is not rewritten and
-those services are not reloaded. Anything unknown takes the full setup path.
-Keep the checker in sync with options the setup helpers write.
+If all checks match, only plugin settings are committed, the live SNAT table is
+rebuilt from the current reservations (`jp-ipoe-forward refresh_snat`: runtime
+recheck, then one atomic nft transaction; existing conntrack bindings survive)
+and stdout is `JP_IPOE_UNCHANGED=1`. Network/firewall/DHCP configuration is not
+rewritten and those services are not reloaded. The refresh exists because
+`dont_snat_to` is consumed by the SNAT helper at bringup and never written to
+UCI, so the comparison cannot see a changed reservation; a refresh failure (tunnel
+changed underneath, or no port left for outbound NAT) fails the Apply with an
+`ERROR:` line. `validate_config` rejects malformed reservation entries before any
+write, since the only runtime symptom would be `INVALID_PORTSETS`. Anything
+unknown takes the full setup path. Keep the checker in sync with options the
+setup helpers write.
 
 The init script deliberately has no config reload trigger: rpcd's `uci commit`
 (used by LuCI Apply) emits `config.change`, and a trigger-driven restart would

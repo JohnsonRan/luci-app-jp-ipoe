@@ -294,8 +294,8 @@ return view.extend({
 		o.optional = true;
 		o.depends('auto', '0');
 
-		o = s.option(form.Value, 'dont_snat_to', _('Reserved IPv4 Ports'), _('Exclude these IPv4 ports from MAP-E SNAT (space-separated). Leave empty unless reserving inbound ports.'));
-		o.datatype = 'string';
+		o = s.option(form.Value, 'dont_snat_to', _('Reserved IPv4 Ports'), _('Exclude these IPv4 ports from MAP-E SNAT (single ports, space-separated, no ranges). Applied to the running tunnel on Apply without a restart. Leave empty unless reserving inbound ports.'));
+		o.datatype = 'list(port)';
 		o.optional = true;
 		o.placeholder = '2938 7088 10233';
 

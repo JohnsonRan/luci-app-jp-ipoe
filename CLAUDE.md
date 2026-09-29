@@ -25,10 +25,10 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 ## Invariants
 
 **Config**
-- A new option goes in `root/etc/config/jp_ipoe`, `config.sh` and `config.js`. If setup writes something from it, also compare it in `configuration_is_current`.
+- A new option goes in `root/etc/config/jp_ipoe`, `config.sh` and `config.js`. If setup writes something from it, also compare it in `configuration_is_current`. If it is only consumed at runtime (like `dont_snat_to` by the SNAT helper), validate it in `validate_config` and make sure the unchanged path re-applies it (`refresh_snat_reservations`), or Apply silently does nothing.
 
 **Start / stop**
-- `start` first runs `configuration_is_current`, which compares owned UCI state, interface/odhcpd liveness, the running MAP rule against a fresh `mapcalc`, and whether the SNAT table exists. A match only commits `jp_ipoe` and prints `JP_IPOE_UNCHANGED=1`, with no service reloads or network/firewall/DHCP writes. Runtime drift is what `repair` (forced stop+start) is for. `boot` also bypasses the shortcut. No persisted success fingerprint.
+- `start` first runs `configuration_is_current`, which compares owned UCI state, interface/odhcpd liveness, the running MAP rule against a fresh `mapcalc`, and whether the SNAT table exists. A match only commits `jp_ipoe`, rebuilds the live SNAT table from the current reservations (`jp-ipoe-forward refresh_snat`, one nft transaction, failure fails the Apply) and prints `JP_IPOE_UNCHANGED=1`, with no service reloads or network/firewall/DHCP writes. Runtime drift is what `repair` (forced stop+start) is for. `boot` also bypasses the shortcut. No persisted success fingerprint.
 - LuCI never runs `start`/`repair` in the foreground: rpcd `file.exec` SIGKILLs at its exec timeout (30s stock) and LuCI's XHR gives up at 20s, while a full setup waits minutes for WAN6. LuCI calls `apply`/`apply_repair` (detached, log in `/tmp/jp-ipoe-apply.log`) and polls read-only `apply_status` until a `JP_IPOE_APPLY_RC=<n>` line appears.
 - `bringup_mape` waits (bounded) for the MAP interface to be up; a netifd handler error (`errors[0].code`, e.g. `INVALID_MAP_RULE`) or a timeout fails the start with an `ERROR:` line. `ifup` alone is not success.
 - `init.d/jp_ipoe` must not have a config reload trigger. rpcd's `uci commit` (LuCI Apply) emits `config.change`, and a restart would tear MAP-E down behind the explicit Apply run.

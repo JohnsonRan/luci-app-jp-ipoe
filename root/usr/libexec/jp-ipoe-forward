@@ -102,6 +102,13 @@ jp_forward_refresh_snat() {
 	sh /usr/libexec/jp-ipoe-map-nft setup "$MAPE_IFACE" "$JP_LINK" "$JP_PUBLIC" "$JP_RANGES"
 }
 
+# Rebuild the live SNAT table from the current reservations (dont_snat_to and
+# saved forwards) for an unchanged, running tunnel. Used by the Apply shortcut.
+jp_forward_refresh() {
+	jp_forward_runtime || { jp_forward_error "MAP-E must be up with a valid assigned port set."; return 1; }
+	jp_forward_refresh_snat
+}
+
 jp_forward_contains() {
 	[ "$(printf '%s' "$1" | jsonfilter -e '@.firewall[0].name' 2>/dev/null)" = "jp_ipoe_$2" ]
 }
@@ -393,6 +400,7 @@ jp_forward6_add() {
 jp_ipoe_config_load
 case "$1" in
 	list) jp_forward_list ;;
+	refresh_snat) jp_forward_refresh ;;
 	add) shift; jp_forward_add "$@" ;;
 	add6) shift; jp_forward6_add "$@" ;;
 	remove)

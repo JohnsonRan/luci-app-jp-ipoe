@@ -16,7 +16,7 @@
 
 . /lib/functions.sh
 . /lib/functions/network.sh
-. /usr/share/jp-ipoe/config.sh
+. /usr/share/jp-ipoe/forward.sh
 
 LOG_TAG="jp-ipoe"
 LOCK_DIR="/var/lock/jp-ipoe.lock.d"
@@ -807,10 +807,21 @@ validate_interface_roles() {
 }
 
 validate_config() {
+	local port
+
 	[ -n "$WAN_DEVICE" ] || {
 		log_err "WAN physical device is not configured."
 		return 1
 	}
+
+	# The SNAT helper rejects this list at bringup, where the only symptom
+	# would be a MAP-E interface that never comes up.
+	for port in $DONT_SNAT_TO; do
+		jp_forward_port_valid "$port" || {
+			log_err "Invalid reserved IPv4 port '$port': use single ports 1-65535 separated by spaces, no ranges."
+			return 1
+		}
+	done
 
 	validate_interface_roles || return 1
 	resolve_ipoe_firewall_zone "$WAN6_IFACE" "$MAPE_IFACE" >/dev/null
@@ -1071,6 +1082,13 @@ EOF
 	nft list table inet "jpipoe_$MAPE_IFACE" >/dev/null 2>&1
 )
 
+# dont_snat_to is consumed by the SNAT helper at bringup, never written to
+# UCI, so configuration_is_current cannot see a changed reservation. Rebuild
+# the live table in one nft transaction; no interface or service restarts.
+refresh_snat_reservations() {
+	sh /usr/libexec/jp-ipoe-forward refresh_snat
+}
+
 # Main start command; repair bypasses only the read-only shortcut.
 cmd_start() {
 	JP_IPOE_CREATED_MAPE=""
@@ -1078,6 +1096,10 @@ cmd_start() {
 
 	if [ "$1" != force ] && configuration_is_current >/dev/null 2>&1; then
 		uci commit jp_ipoe || { log_err "Failed to save JP IPoE settings."; return 1; }
+		refresh_snat_reservations >/dev/null 2>&1 || {
+			log_err "Settings unchanged, but the reserved IPv4 ports could not be applied to the running SNAT table (interface changed, or no port left for outbound NAT). Use Force Reconnect / Repair."
+			return 1
+		}
 		log "IPoE configuration already matches the running setup; no restart needed."
 		printf 'JP_IPOE_UNCHANGED=1\n'
 		return 0

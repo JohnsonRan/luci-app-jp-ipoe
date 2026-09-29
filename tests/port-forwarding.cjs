@@ -1011,8 +1011,15 @@ exit 0
 uci() { [ "$*" = 'commit jp_ipoe' ] || fail "unexpected mutation $*"; echo COMMIT >> "$TEST_TMP/uci-log"; }
 configuration_is_current() { echo CHECK >> "$TEST_TMP/uci-log"; return 0; }
 run_start_pipeline() { echo PIPELINE >> "$TEST_TMP/uci-log"; }
+# dont_snat_to only exists at runtime: the unchanged path must rebuild the
+# live SNAT table (after the commit it reads from) instead of skipping it.
+refresh_snat_reservations() { grep -q COMMIT "$TEST_TMP/uci-log" || fail refresh-before-commit; echo SNAT >> "$TEST_TMP/uci-log"; }
 [ "$(cmd_start)" = 'JP_IPOE_UNCHANGED=1' ] || fail unchanged-marker
 [ "$(grep -c PIPELINE "$TEST_TMP/uci-log")" = 0 ] || fail redundant-apply
+refresh_snat_reservations() { return 1; }
+cmd_start 2> "$TEST_TMP/refresh-err" && fail hidden-refresh-failure
+grep -q '^ERROR: .*reserved IPv4 ports could not be applied' "$TEST_TMP/refresh-err" || fail missing-refresh-error
+refresh_snat_reservations() { fail refresh-outside-shortcut; }
 cmd_stop() { echo STOP >> "$TEST_TMP/uci-log"; }
 cmd_repair || fail repair
 configuration_is_current() { echo CHECK >> "$TEST_TMP/uci-log"; return 1; }
@@ -1022,10 +1029,30 @@ cmd_start && fail hidden-error
 exit 0
 `, setup);
   log = fs.readFileSync(tmp + '/uci-log', 'utf8');
-  assert.equal((log.match(/CHECK/g) || []).length, 3);
+  assert.equal((log.match(/CHECK/g) || []).length, 4);
   assert.equal((log.match(/PIPELINE/g) || []).length, 2);
-  assert.equal((log.match(/COMMIT/g) || []).length, 3);
+  assert.equal((log.match(/COMMIT/g) || []).length, 4);
+  assert.equal((log.match(/SNAT/g) || []).length, 1);
   assert.equal((log.match(/STOP/g) || []).length, 1);
+
+  run('reserved IPv4 ports: validated before setup; refresh needs a live tunnel', `
+validate_interface_roles() { :; }; resolve_ipoe_firewall_zone() { echo wan; }
+WAN_DEVICE=eth0
+for DONT_SNAT_TO in '' 2938 '2938 7088 10233' 65535 '  2938  '; do
+ validate_config || fail "rejected '$DONT_SNAT_TO'"
+done
+for DONT_SNAT_TO in 0 65536 2938-3000 abc 080 '2938,7088' 2938.5; do
+ validate_config 2> "$TEST_TMP/reserved-err" && fail "accepted '$DONT_SNAT_TO'"
+ grep -q "^ERROR: Invalid reserved IPv4 port" "$TEST_TMP/reserved-err" || fail "missing error for '$DONT_SNAT_TO'"
+done
+jp_forward_runtime() { return 1; }
+jp_forward_refresh_snat() { fail refresh-without-runtime; }
+jp_forward_refresh 2> "$TEST_TMP/refresh-err" && fail refreshed-down-tunnel
+grep -q '^ERROR: MAP-E must be up' "$TEST_TMP/refresh-err" || fail missing-runtime-error
+jp_forward_runtime() { JP_PUBLIC=203.0.113.1; JP_RANGES='1000-1005'; JP_LINK=map-wan6mape; }
+jp_forward_refresh_snat() { echo REFRESH; }
+[ "$(jp_forward_refresh)" = REFRESH ] || fail missing-refresh
+`, setup + command);
 
   // LuCI reaches the script through rpcd file.exec (SIGKILL at its exec
   // timeout, 20s XHR timeout) and a full setup waits minutes for WAN6, so
