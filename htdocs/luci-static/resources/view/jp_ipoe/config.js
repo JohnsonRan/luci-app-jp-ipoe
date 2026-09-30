@@ -304,7 +304,14 @@ return view.extend({
 		o.depends('auto', '0');
 
 		o = s.option(form.Value, 'dont_snat_to', _('Reserved IPv4 Ports'), _('Exclude these IPv4 ports from MAP-E SNAT (single ports, space-separated, no ranges). Applied to the running tunnel on Apply without a restart. Leave empty unless reserving inbound ports.'));
-		o.datatype = 'list(port)';
+		// Match the backend (jp_forward_port_valid): LuCI's port() accepts 0 and 080.
+		o.validate = function(section_id, value) {
+			var ports = String(value || '').trim().split(/\s+/).filter(Boolean);
+			for (var i = 0; i < ports.length; i++)
+				if (!/^[1-9][0-9]{0,4}$/.test(ports[i]) || +ports[i] > 65535)
+					return _('Use single ports 1-65535 separated by spaces, no ranges.');
+			return true;
+		};
 		o.optional = true;
 		o.placeholder = '2938 7088 10233';
 

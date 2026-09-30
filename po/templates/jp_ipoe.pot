@@ -266,6 +266,10 @@ msgstr ""
 msgid "Exclude these IPv4 ports from MAP-E SNAT (single ports, space-separated, no ranges). Applied to the running tunnel on Apply without a restart. Leave empty unless reserving inbound ports."
 msgstr ""
 
+#: htdocs/luci-static/resources/view/jp_ipoe/config.js:313
+msgid "Use single ports 1-65535 separated by spaces, no ranges."
+msgstr ""
+
 #: htdocs/luci-static/resources/view/jp_ipoe/config.js:213
 msgid "Status"
 msgstr ""

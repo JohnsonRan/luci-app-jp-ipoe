@@ -935,7 +935,7 @@ run_start_pipeline() {
 	}
 
 	bringup_mape || {
-		fail_start "MAP-E bringup failed; managed MAP-E configuration was removed."
+		fail_start "MAP-E bringup or firewall reload failed."
 		return 1
 	}
 }
@@ -1060,8 +1060,8 @@ cmd_start() {
 
 	if [ "$1" != force ] && configuration_is_current >/dev/null 2>&1; then
 		uci commit jp_ipoe || { log_err "Failed to save JP IPoE settings."; return 1; }
-		refresh_snat_reservations >/dev/null 2>&1 || {
-			log_err "Settings unchanged, but the reserved IPv4 ports could not be applied to the running SNAT table (interface changed, or no port left for outbound NAT). Use Force Reconnect / Repair."
+		refresh_snat_reservations >/dev/null || {
+			log_err "Settings unchanged, but the reserved IPv4 ports could not be applied to the running SNAT table. If Reserved IPv4 Ports cover every assigned port, free some first; otherwise use Force Reconnect / Repair."
 			return 1
 		}
 		log "IPoE configuration already matches the running setup; no restart needed."
@@ -1190,8 +1190,11 @@ cmd_boot() {
 # SIGKILL at rpcd's exec timeout (30s by default), while a full setup can wait
 # minutes for WAN6. SIGKILL skips every trap, so LuCI must never run start or
 # repair in the foreground. Detach it and let the UI poll apply_status.
+# The redirection must cover the whole subshell: rpcd replies only after the
+# caller's stdout/stderr pipes reach EOF, so an inherited pipe would hold the
+# LuCI request open until the worker finishes.
 run_detached() {
-	( "$@" </dev/null >>"$APPLY_LOG" 2>&1; echo "JP_IPOE_APPLY_RC=$?" >>"$APPLY_LOG" ) &
+	( "$@"; echo "JP_IPOE_APPLY_RC=$?" ) </dev/null >>"$APPLY_LOG" 2>&1 &
 }
 
 cmd_apply() {

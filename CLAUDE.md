@@ -13,7 +13,7 @@ OpenWrt LuCI package for Japan NTT IPoE **MAP-E** (OCN Virtual Connect, JPNE v6p
 
 | Path | Role |
 |---|---|
-| `root/usr/sbin/jp-ipoe-setup` | Entry point: `start`, `repair`, `apply`/`apply_repair`/`apply_status`, `stop`, `boot`, `status`, `resolve`, `forward_*`. Mutations run under `run_locked`. |
+| `root/usr/sbin/jp-ipoe-setup` | Entry point: `start`, `repair`, `apply`/`apply_repair`/`apply_status`, `stop`, `boot`, `status`, `resolve`, `forward_*`, `uninstall` (package prerm only). Mutations run under `run_locked`. |
 | `root/usr/share/jp-ipoe/config.sh` | `jp_ipoe_config_load` defaults, shared helpers (`jp_ipoe_mapcalc_lookup`, `find_pppoe_sections`). |
 | `root/usr/share/jp-ipoe/map.sh` | Patched netifd MAP protocol; installed by `jp-ipoe-install-map` (backup `map.sh.orig`, `restore` on prerm). |
 | `root/usr/libexec/jp-ipoe-map-nft` | Multi-range SNAT table `inet jpipoe_<cfg>`. |

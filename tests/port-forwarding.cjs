@@ -1061,8 +1061,9 @@ run_start_pipeline() { echo PIPELINE >> "$TEST_TMP/uci-log"; }
 refresh_snat_reservations() { grep -q COMMIT "$TEST_TMP/uci-log" || fail refresh-before-commit; echo SNAT >> "$TEST_TMP/uci-log"; }
 [ "$(cmd_start)" = 'JP_IPOE_UNCHANGED=1' ] || fail unchanged-marker
 [ "$(grep -c PIPELINE "$TEST_TMP/uci-log")" = 0 ] || fail redundant-apply
-refresh_snat_reservations() { return 1; }
+refresh_snat_reservations() { echo 'ERROR: helper detail' >&2; return 1; }
 cmd_start 2> "$TEST_TMP/refresh-err" && fail hidden-refresh-failure
+grep -Fxq 'ERROR: helper detail' "$TEST_TMP/refresh-err" || fail swallowed-refresh-cause
 grep -q '^ERROR: .*reserved IPv4 ports could not be applied' "$TEST_TMP/refresh-err" || fail missing-refresh-error
 refresh_snat_reservations() { fail refresh-outside-shortcut; }
 cmd_stop() { echo STOP >> "$TEST_TMP/uci-log"; }
@@ -1118,6 +1119,13 @@ run_detached sh -c 'echo ERROR: worker failed >&2; exit 3'
 wait
 grep -Fxq 'ERROR: worker failed' "$APPLY_LOG" || fail missing-worker-output
 grep -Fxq 'JP_IPOE_APPLY_RC=3' "$APPLY_LOG" || fail missing-exit-code
+# rpcd replies only at stdout/stderr EOF: the worker must not hold them.
+: > "$APPLY_LOG"; started=$(date +%s)
+held="$(run_detached sh -c 'sleep 3; exit 4' 2>&1)"
+[ $(( $(date +%s) - started )) -lt 2 ] || fail worker-holds-caller-pipes
+[ -z "$held" ] || fail worker-wrote-to-caller
+for i in 1 2 3 4 5 6 7 8 9 10; do grep -Fxq 'JP_IPOE_APPLY_RC=4' "$APPLY_LOG" && break; sleep 1; done
+grep -Fxq 'JP_IPOE_APPLY_RC=4' "$APPLY_LOG" || fail missing-detached-exit-code
 run_detached() { printf 'DETACHED %s\\n' "$*" >> "$TEST_TMP/detach-log"; }
 [ "$(cmd_apply start)" = 'JP_IPOE_APPLY=start' ] || fail apply-marker
 [ -z "$(cat "$APPLY_LOG")" ] || fail stale-log-not-cleared
@@ -1557,6 +1565,15 @@ done
   assert.match(wan6Field[0], /o\.default = 'wan6';/);
   assert.match(wan6Field[0], /o\.nocreate = false;/, 'WAN6 must allow a not-yet-created interface name');
   console.log('PASS WAN6 selector structure: existing interfaces, custom names and wan6 default');
+  // The form must refuse what validate_config refuses (LuCI port() takes 0, 080).
+  const reservedValidate = js.match(/'dont_snat_to'[\s\S]*?o\.validate = (function[\s\S]*?\n\t\t\};)/);
+  assert(reservedValidate, 'reserved ports field has a backend-matching validator');
+  const checkReserved = new Function('_', 'return ' + reservedValidate[1].slice(0, -1))(text => text);
+  for (const value of ['', undefined, '2938', '2938 7088 10233', '65535', '  2938  '])
+    assert.equal(checkReserved('cfg', value), true, `rejected ${value}`);
+  for (const value of ['0', '65536', '2938-3000', 'abc', '080', '2938,7088', '2938.5', '100000'])
+    assert.notEqual(checkReserved('cfg', value), true, `accepted ${value}`);
+  console.log('PASS reserved IPv4 ports form validation matches the backend');
   let modal, notifications = 0, executions = 0;
   const messages = [], elements = {};
   let executeCommand = () => { executions++; throw new Error('Unexpected duplicate submission'); };

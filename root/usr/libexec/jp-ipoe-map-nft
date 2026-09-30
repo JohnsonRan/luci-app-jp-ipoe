@@ -54,7 +54,10 @@ apply_rules() {
 	local nft_table range port index proto
 
 	load_reserved_ports "$cfg" "$snat_ip" || return 1
-	jp_forward_select "$portsets" "$DONT_SNAT_TO" "" >/dev/null || return 1
+	jp_forward_select "$portsets" "$DONT_SNAT_TO" "" >/dev/null || {
+		echo "ERROR: No assigned port is left for outbound NAT after the reserved IPv4 ports (or the port set is invalid)." >&2
+		return 1
+	}
 	build_ranges "$portsets" || return 1
 	nft_table="$(table_name "$cfg")"
 
